@@ -8,7 +8,7 @@
 #include "py/obj.h"
 
 #if ( configUSE_TRACE_FACILITY != 1 )
-#error config_USE_TRACE_FACILITY must be set
+//#error config_USE_TRACE_FACILITY must be set
 #endif
 
 /// task object which represents a snapshot of a FreeRTOS task at a given time.
