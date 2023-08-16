@@ -1,6 +1,7 @@
 from st3m.application import Application, ApplicationContext
 from st3m.goose import Tuple, Any
 from st3m.input import InputState
+import captouch
 from ctx import Context
 import leds
 import json
@@ -10,7 +11,7 @@ CONFIG_SCHEMA: dict[str, dict[str, Any]] = {
     "name": {"types": [str]},
     "size": {"types": [int, float], "cast_to": int},
     "font": {"types": [int, float], "cast_to": int},
-    "pronouns": {"types": ["list_of_str"]},
+    "pronouns": {"types": ["list_of_str", str], "cast_to": list},
     "pronouns_size": {"types": [int, float], "cast_to": int},
     "color": {"types": ["hex_color"]},
     "mode": {"types": [int, float], "cast_to": int},
@@ -73,7 +74,12 @@ class Configuration:
             else:
                 # Cast to relevant type if needed
                 if type_data.get("cast_to"):
-                    data[config_key] = type_data["cast_to"](data[config_key])
+                    if type_data["cast_to"] == list and isinstance(
+                        data[config_key], str
+                    ):
+                        data[config_key] = data[config_key].split()
+                    else:
+                        data[config_key] = type_data["cast_to"](data[config_key])
                 setattr(res, config_key, data[config_key])
 
         if config_type_errors:
@@ -114,6 +120,10 @@ class NickApp(Application):
         self._config = Configuration.load(self._filename)
         self._pronouns_serialized = " ".join(self._config.pronouns)
         self._angle = 0.0
+        self._normalized_colors = self._config.to_normalized_tuple()
+        self._petal_r = 6
+        self._petal_g = 5
+        self._petal_b = 4
 
     def draw(self, ctx: Context) -> None:
         ctx.text_align = ctx.CENTER
@@ -122,7 +132,7 @@ class NickApp(Application):
         ctx.font = ctx.get_font_name(self._config.font)
 
         ctx.rgb(0, 0, 0).rectangle(-120, -120, 240, 240).fill()
-        ctx.rgb(*self._config.to_normalized_tuple())
+        ctx.rgb(*self._normalized_colors)
 
         if self._config.config_errors:
             draw_y = (-20 * len(self._config.config_errors)) / 2
@@ -160,11 +170,44 @@ class NickApp(Application):
         leds.set_hsv(int(self._led), abs(self._scale_name) * 360, 1, 0.2)
 
         leds.update()
-        # ctx.fill()
 
     def on_exit(self) -> None:
         if not self._config.config_errors:
             self._config.save(self._filename)
+            self._normalized_colors = self._config.to_normalized_tuple()
+
+    def color_limit_value(self, raw: float) -> float:
+        if raw > 1.0:
+            return 1.0
+        elif raw < 0.0:
+            return 0.0
+        else:
+            return raw
+
+    def process_petal_touch(self) -> None:
+        petals = captouch.read().petals
+
+        val_r, val_g, val_b = self._normalized_colors
+
+        if petals[self._petal_r].position[0] > 10000:
+            val_r = self.color_limit_value(val_r + 1.0 / 32)
+
+        if petals[self._petal_r].position[0] < -10000:
+            val_r = self.color_limit_value(val_r - 1.0 / 32)
+
+        if petals[self._petal_g].position[0] > 20000:
+            val_g = self.color_limit_value(val_g + 1.0 / 32)
+
+        if 1000 < petals[self._petal_g].position[0] < 15000:
+            val_g = self.color_limit_value(val_g - 1.0 / 32)
+
+        if petals[self._petal_b].position[0] > 10000:
+            val_b = self.color_limit_value(val_b + 1.0 / 32)
+
+        if petals[self._petal_b].position[0] < -10000:
+            val_b = self.color_limit_value(val_b - 1.0 / 32)
+
+        self._normalized_colors = (val_r, val_g, val_b)
 
     def think(self, ins: InputState, delta_ms: int) -> None:
         super().think(ins, delta_ms)
@@ -182,6 +225,8 @@ class NickApp(Application):
         self._led += delta_ms / 45
         if self._led >= 40:
             self._led = 0
+
+        self.process_petal_touch()
 
 
 # For running with `mpremote run`:
