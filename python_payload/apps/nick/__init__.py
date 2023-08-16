@@ -35,13 +35,14 @@ class Configuration:
                 res.size = data["size"]
         if "font" in data and type(data["font"]) == int:
             res.font = data["font"]
-        # type checks don't look inside collections
-        if (
-            "pronouns" in data
-            and type(data["pronouns"]) == list
-            and set([type(x) for x in data["pronouns"]]) == {str}
-        ):
-            res.pronouns = data["pronouns"]
+        if "pronouns" in data:
+            # type checks don't look inside collections
+            if type(data["pronouns"]) == list and set(
+                [type(x) for x in data["pronouns"]]
+            ) == {str}:
+                res.pronouns = data["pronouns"]
+            if type(data["pronouns"]) == str:
+                res.pronouns = data["pronouns"].split()
         if "pronouns_size" in data:
             if type(data["pronouns_size"]) == float:
                 res.pronouns_size = int(data["pronouns_size"])
@@ -88,6 +89,13 @@ class NickApp(Application):
         self._filename = "/flash/nick.json"
         self._config = Configuration.load(self._filename)
         self._pronouns_serialized = " ".join(self._config.pronouns)
+        self._normalized_colors = self._config.to_normalized_tuple()
+        self.PETAL_R = 6
+        self.PETAL_G = 5
+        self.PETAL_B = 4
+
+    def to_denormalized_string(self) -> str:
+        return f"0x{int(self._normalized_colors[0] * 255):x}{int(self._normalized_colors[1] * 255):x}{int(self._normalized_colors[2] * 255):x}"
 
     def draw(self, ctx: Context) -> None:
         ctx.text_align = ctx.CENTER
@@ -96,7 +104,7 @@ class NickApp(Application):
         ctx.font = ctx.get_font_name(self._config.font)
 
         ctx.rgb(0, 0, 0).rectangle(-120, -120, 240, 240).fill()
-        ctx.rgb(*self._config.to_normalized_tuple())
+        ctx.rgb(*self._normalized_colors)
 
         ctx.move_to(0, 0)
         ctx.save()
@@ -115,7 +123,6 @@ class NickApp(Application):
         leds.set_hsv(int(self._led), abs(self._scale_name) * 360, 1, 0.2)
 
         leds.update()
-        # ctx.fill()
 
     def on_exit(self) -> None:
         self._config.save(self._filename)
@@ -129,6 +136,106 @@ class NickApp(Application):
         self._led += delta_ms / 45
         if self._led >= 40:
             self._led = 0
+
+        pos_r = ins.captouch.petals[self.PETAL_R].position
+        pos_g = ins.captouch.petals[self.PETAL_G].position
+        pos_b = ins.captouch.petals[self.PETAL_B].position
+
+        if pos_r[0] > 10000:
+            self._normalized_colors = (
+                self._normalized_colors[0] + 1.0 / 32,
+                self._normalized_colors[1],
+                self._normalized_colors[2],
+            )
+
+            if self._normalized_colors[0] > 1.0:
+                self._normalized_colors = (
+                    1.0,
+                    self._normalized_colors[1],
+                    self._normalized_colors[2],
+                )
+
+            self._config.color = self.to_denormalized_string()
+
+        if pos_r[0] < -10000:
+            self._normalized_colors = (
+                self._normalized_colors[0] - 1.0 / 32,
+                self._normalized_colors[1],
+                self._normalized_colors[2],
+            )
+
+            if self._normalized_colors[0] < 0.0:
+                self._normalized_colors = (
+                    0.0,
+                    self._normalized_colors[1],
+                    self._normalized_colors[2],
+                )
+
+            self._config.color = self.to_denormalized_string()
+
+        if pos_g[0] > 20000:
+            self._normalized_colors = (
+                self._normalized_colors[0],
+                self._normalized_colors[1] + 1.0 / 32,
+                self._normalized_colors[2],
+            )
+
+            if self._normalized_colors[1] > 1.0:
+                self._normalized_colors = (
+                    self._normalized_colors[0],
+                    1.0,
+                    self._normalized_colors[2],
+                )
+
+            self._config.color = self.to_denormalized_string()
+
+        if pos_g[0] > 1000 and pos_g[0] < 15000:
+            self._normalized_colors = (
+                self._normalized_colors[0],
+                self._normalized_colors[1] - 1.0 / 32,
+                self._normalized_colors[2],
+            )
+
+            if self._normalized_colors[1] < 0.0:
+                self._normalized_colors = (
+                    self._normalized_colors[0],
+                    0.0,
+                    self._normalized_colors[2],
+                )
+
+            self._config.color = self.to_denormalized_string()
+
+        if pos_b[0] > 10000:
+            self._normalized_colors = (
+                self._normalized_colors[0],
+                self._normalized_colors[1],
+                self._normalized_colors[2] + 1.0 / 32,
+            )
+
+            if self._normalized_colors[2] > 1.0:
+                self._normalized_colors = (
+                    self._normalized_colors[0],
+                    self._normalized_colors[1],
+                    1.0,
+                )
+
+            self._config.color = self.to_denormalized_string()
+
+        if pos_b[0] < -10000:
+            self._normalized_colors = (
+                self._normalized_colors[0],
+                self._normalized_colors[1],
+                self._normalized_colors[2] - 1.0 / 32,
+            )
+
+            if self._normalized_colors[2] < 0.0:
+                self._normalized_colors = (
+                    self._normalized_colors[0],
+                    self._normalized_colors[1],
+                    0.0,
+                )
+
+            self._config.color = self.to_denormalized_string()
 
 
 # For running with `mpremote run`:

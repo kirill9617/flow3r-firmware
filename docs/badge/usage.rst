@@ -55,11 +55,14 @@ pendrive). Open the file ```nick.json`` in a text editor and change your nick,
 pronouns, font sizes for nick and pronouns, and whatever else you wish. Please
 note that ``pronouns`` is a list, and should be formatted as such. for example:
 ``"pronouns": ["aa/bb", "cc/dd"],``
+If you provide a string value there, the code will also handle that, but it
+will be converted to a list.
 
 For the ``nick.json`` file to appear, you must have started the Nick app at
 least once.
 
-Use ``"color": "0xffffff",`` to color your name and pronouns.
+Use ``"color": "0xffffff",`` to color your name and pronouns, and you can also
+use the bottom three petals to change the color on the fly.
 
 When you're done editing, unmount/eject the badge from your computer
 (``umount`` on Linux is enough) and press the left shoulder button to exit Disk
