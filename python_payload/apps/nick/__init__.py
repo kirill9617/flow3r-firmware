@@ -16,6 +16,7 @@ class Configuration:
         self.pronouns: list[str] = []
         self.pronouns_size: int = 25
         self.color = "0x40ff22"
+        self.animation: int = 1
 
     @classmethod
     def load(cls, path: str) -> "Configuration":
@@ -26,6 +27,10 @@ class Configuration:
             data = json.loads(jsondata)
         except OSError:
             data = {}
+        if "animation" in data and type(data["animation"]) == int:
+            res.animation = data["animation"]
+        if "font" in data and type(data["font"]) == int:
+            res.font = data["font"]
         if "name" in data and type(data["name"]) == str:
             res.name = data["name"]
         if "size" in data:
@@ -33,8 +38,6 @@ class Configuration:
                 res.size = int(data["size"])
             if type(data["size"]) == int:
                 res.size = data["size"]
-        if "font" in data and type(data["font"]) == int:
-            res.font = data["font"]
         # type checks don't look inside collections
         if (
             "pronouns" in data
@@ -64,6 +67,7 @@ class Configuration:
             "pronouns": self.pronouns,
             "pronouns_size": self.pronouns_size,
             "color": self.color,
+            "animation": self.animation,
         }
         jsondata = json.dumps(d)
         with open(path, "w") as f:
@@ -100,7 +104,11 @@ class NickApp(Application):
 
         ctx.move_to(0, 0)
         ctx.save()
-        ctx.scale(self._scale_name, 1)
+
+        # Animation
+        if self._config.animation == 1:
+            ctx.scale(self._scale_name, 1)
+
         ctx.text(self._config.name)
         ctx.restore()
 
