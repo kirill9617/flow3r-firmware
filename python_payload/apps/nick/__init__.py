@@ -15,7 +15,10 @@ class Configuration:
         self.font: int = 5
         self.pronouns: list[str] = []
         self.pronouns_size: int = 25
-        self.color = "0x40ff22"
+        self.color: str = "0x40ff22"
+        self.alters: Dict[str, Any] = {}
+        self.system_name: str = ""
+        self.system_size: int = 15
 
     @classmethod
     def load(cls, path: str) -> "Configuration":
@@ -26,8 +29,37 @@ class Configuration:
             data = json.loads(jsondata)
         except OSError:
             data = {}
-        if "name" in data and type(data["name"]) == str:
-            res.name = data["name"]
+        if "alters" in data and type(data["alters"]) == Dict:
+            res.name = ""
+            res.pronouns = [""]
+            res.color = ""
+            res.alters = data["alters"]
+            # some plural systems also use another name to refer to themselves as a whole
+            if "system_name" in data and type(data["system_name"]) == str:
+                res.system_name = data["system_name"]
+            if "system_size" in data:
+                if type(data["system_size"]) == float:
+                    res.system_size = int(data["system_size"])
+                if type(data["system_size"]) == int:
+                    res.system_size = data["system_size"]
+        else:
+            if "name" in data and type(data["name"]) == str:
+                res.name = data["name"]
+            if "pronouns" in data:
+                # type checks don't look inside collections
+                if type(data["pronouns"]) == list and set(
+                    [type(x) for x in data["pronouns"]]
+                ) == {str}:
+                    res.pronouns = data["pronouns"]
+                if type(data["pronouns"]) == str:
+                    res.pronouns = data["pronouns"].split()
+            if (
+                "color" in data
+                and type(data["color"]) == str
+                and data["color"][0:2] == "0x"
+                and len(data["color"]) == 8
+            ):
+                res.color = data["color"]
         if "size" in data:
             if type(data["size"]) == float:
                 res.size = int(data["size"])
@@ -35,25 +67,11 @@ class Configuration:
                 res.size = data["size"]
         if "font" in data and type(data["font"]) == int:
             res.font = data["font"]
-        # type checks don't look inside collections
-        if (
-            "pronouns" in data
-            and type(data["pronouns"]) == list
-            and set([type(x) for x in data["pronouns"]]) == {str}
-        ):
-            res.pronouns = data["pronouns"]
         if "pronouns_size" in data:
             if type(data["pronouns_size"]) == float:
                 res.pronouns_size = int(data["pronouns_size"])
             if type(data["pronouns_size"]) == int:
                 res.pronouns_size = data["pronouns_size"]
-        if (
-            "color" in data
-            and type(data["color"]) == str
-            and data["color"][0:2] == "0x"
-            and len(data["color"]) == 8
-        ):
-            res.color = data["color"]
         return res
 
     def save(self, path: str) -> None:
@@ -64,18 +82,14 @@ class Configuration:
             "pronouns": self.pronouns,
             "pronouns_size": self.pronouns_size,
             "color": self.color,
+            "alters": self.alters,
+            "system_name": self.system_name,
+            "system_size": self.system_size,
         }
         jsondata = json.dumps(d)
         with open(path, "w") as f:
             f.write(jsondata)
             f.close()
-
-    def to_normalized_tuple(self) -> Tuple[float, float, float]:
-        return (
-            int(self.color[2:4], 16) / 255.0,
-            int(self.color[4:6], 16) / 255.0,
-            int(self.color[6:8], 16) / 255.0,
-        )
 
 
 class NickApp(Application):
@@ -87,7 +101,33 @@ class NickApp(Application):
         self._phase = 0.0
         self._filename = "/flash/nick.json"
         self._config = Configuration.load(self._filename)
-        self._pronouns_serialized = " ".join(self._config.pronouns)
+        self.PETAL_R = 6
+        self.PETAL_G = 5
+        self.PETAL_B = 4
+
+        if self._config.alters:
+            self._current_name = list(self._config.alters.keys())[0]
+            self._current_pronouns_serialized = " ".join(
+                self._config.alters[self._current_name]["pronouns"]
+            )
+            self._normalized_colors = self.to_normalized_tuple(
+                self._config.alters[self._current_name]["color"]
+            )
+            self._current_alter_id = 0
+        else:
+            self._current_name = self._config.name
+            self._current_pronouns_serialized = " ".join(self._config.pronouns)
+            self._normalized_colors = self.to_normalized_tuple(self._config.color)
+
+    def to_denormalized_string(self) -> str:
+        return f"0x{int(self._normalized_colors[0] * 255):x}{int(self._normalized_colors[1] * 255):x}{int(self._normalized_colors[2] * 255):x}"
+
+    def to_normalized_tuple(self, color: str) -> Tuple[float, float, float]:
+        return (
+            int(color[2:4], 16) / 255.0,
+            int(color[4:6], 16) / 255.0,
+            int(color[6:8], 16) / 255.0,
+        )
 
     def draw(self, ctx: Context) -> None:
         ctx.text_align = ctx.CENTER
@@ -96,26 +136,32 @@ class NickApp(Application):
         ctx.font = ctx.get_font_name(self._config.font)
 
         ctx.rgb(0, 0, 0).rectangle(-120, -120, 240, 240).fill()
-        ctx.rgb(*self._config.to_normalized_tuple())
+        ctx.rgb(*self._normalized_colors)
 
         ctx.move_to(0, 0)
         ctx.save()
         ctx.scale(self._scale_name, 1)
-        ctx.text(self._config.name)
+        ctx.text(self._current_name)
         ctx.restore()
 
-        if self._pronouns_serialized:
+        if self._current_pronouns_serialized:
             ctx.move_to(0, -60)
             ctx.font_size = self._config.pronouns_size
             ctx.save()
             ctx.scale(1, self._scale_pronouns)
-            ctx.text(self._pronouns_serialized)
+            ctx.text(self._current_pronouns_serialized)
             ctx.restore()
+
+            if self._config.system_name:
+                ctx.move_to(-30, -30)
+                ctx.font_size = self._config.system_size
+                ctx.save()
+                ctx.text(self._config.system_name)
+                ctx.restore()
 
         leds.set_hsv(int(self._led), abs(self._scale_name) * 360, 1, 0.2)
 
         leds.update()
-        # ctx.fill()
 
     def on_exit(self) -> None:
         self._config.save(self._filename)
@@ -129,6 +175,122 @@ class NickApp(Application):
         self._led += delta_ms / 45
         if self._led >= 40:
             self._led = 0
+
+        if self.input.buttons.app.middle.pressed and self._config.alters:
+            self._current_alter_id += 1
+
+            if self._current_alter_id > len(self._config.alters) - 1:
+                self._current_alter_id = 0
+
+            self._current_name = list(self._config.alters.keys())[
+                self._current_alter_id
+            ]
+            self._normalized_colors = self.to_normalized_tuple(
+                self._config.alters[self._current_name]["color"]
+            )
+            self._current_pronouns_serialized = " ".join(
+                self._config.alters[self._current_name]["pronouns"]
+            )
+
+        pos_r = ins.captouch.petals[self.PETAL_R].position
+        pos_g = ins.captouch.petals[self.PETAL_G].position
+        pos_b = ins.captouch.petals[self.PETAL_B].position
+
+        if pos_r[0] > 10000:
+            self._normalized_colors = (
+                self._normalized_colors[0] + 1.0 / 32,
+                self._normalized_colors[1],
+                self._normalized_colors[2],
+            )
+
+            if self._normalized_colors[0] > 1.0:
+                self._normalized_colors = (
+                    1.0,
+                    self._normalized_colors[1],
+                    self._normalized_colors[2],
+                )
+
+            self._config.color = self.to_denormalized_string()
+
+        if pos_r[0] < -10000:
+            self._normalized_colors = (
+                self._normalized_colors[0] - 1.0 / 32,
+                self._normalized_colors[1],
+                self._normalized_colors[2],
+            )
+
+            if self._normalized_colors[0] < 0.0:
+                self._normalized_colors = (
+                    0.0,
+                    self._normalized_colors[1],
+                    self._normalized_colors[2],
+                )
+
+            self._config.color = self.to_denormalized_string()
+
+        if pos_g[0] > 20000:
+            self._normalized_colors = (
+                self._normalized_colors[0],
+                self._normalized_colors[1] + 1.0 / 32,
+                self._normalized_colors[2],
+            )
+
+            if self._normalized_colors[1] > 1.0:
+                self._normalized_colors = (
+                    self._normalized_colors[0],
+                    1.0,
+                    self._normalized_colors[2],
+                )
+
+            self._config.color = self.to_denormalized_string()
+
+        if pos_g[0] > 1000 and pos_g[0] < 15000:
+            self._normalized_colors = (
+                self._normalized_colors[0],
+                self._normalized_colors[1] - 1.0 / 32,
+                self._normalized_colors[2],
+            )
+
+            if self._normalized_colors[1] < 0.0:
+                self._normalized_colors = (
+                    self._normalized_colors[0],
+                    0.0,
+                    self._normalized_colors[2],
+                )
+
+            self._config.color = self.to_denormalized_string()
+
+        if pos_b[0] > 10000:
+            self._normalized_colors = (
+                self._normalized_colors[0],
+                self._normalized_colors[1],
+                self._normalized_colors[2] + 1.0 / 32,
+            )
+
+            if self._normalized_colors[2] > 1.0:
+                self._normalized_colors = (
+                    self._normalized_colors[0],
+                    self._normalized_colors[1],
+                    1.0,
+                )
+
+            self._config.color = self.to_denormalized_string()
+
+        if pos_b[0] < -10000:
+            self._normalized_colors = (
+                self._normalized_colors[0],
+                self._normalized_colors[1],
+                self._normalized_colors[2] - 1.0 / 32,
+            )
+
+            if self._normalized_colors[2] < 0.0:
+                self._normalized_colors = (
+                    self._normalized_colors[0],
+                    self._normalized_colors[1],
+                    0.0,
+                )
+
+            self._config.color = self.to_denormalized_string()
 
 
 # For running with `mpremote run`:
