@@ -6,11 +6,29 @@ stages:
 variables:
   GIT_SUBMODULE_STRATEGY: recursive
   GIT_DEPTH: 0
+  CACHIX_CACHE_NAME: flow3r
+  BUILD_IMAGE_NAME: ${CI_REGISTRY_IMAGE}/flow3r-build:${CI_COMMIT_SHA}
 
 default:
   # built via:
   #     docker load < $(nix-build nix/docker-image.nix)
   image: registry.gitlab.com/flow3r-badge/flow3r-build:kfjixcricw2358zp5vg15b784l9jnpzz
+
+nix-deps:
+  image: docker.nix-community.org/nixpkgs/nix-flakes
+  stage: .pre
+  script:
+    - set +e +o pipefail
+    # cache development environment
+    - nix run .#build-and-cache -- devShell
+    # build docker image and cache if not already in cache
+    - nix run .#build-and-cache -- dockerImage
+    # push docker image
+    # FIXME: disabled because the gitlab registry is broken
+    #- |
+    #  echo "${CI_REGISTRY_PASSWORD}" \
+    #    | skopeo login --username="${CI_REGISTRY_USER}" --password-stdin "${CI_REGISTRY}"
+    #- skopeo copy --tmpdir /tmp --insecure-policy "docker-archive://${PWD}/result" "docker://${BUILD_IMAGE_NAME}"
 
 clang-tidy:
   stage: check
