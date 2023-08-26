@@ -110,19 +110,27 @@ def _make_compositor(reactor: Reactor, vm: ViewManager) -> overlays.Compositor:
     return compositor
 
 
+def run_views(views: List[View]) -> None:
+    """
+    Run a given View in the foreground, with potentially other Views underneath.
+    """
+    vm = ViewManager(ViewTransitionBlend())
+    for v in views:
+        vm.push(v)
+    reactor = _make_reactor()
+    compositor = _make_compositor(reactor, vm)
+    top = processors.ProcessorMidldeware(compositor)
+    reactor.set_top(top)
+    reactor.run()
+
+
 def run_view(v: View) -> None:
     """
     Run a given View in the foreground, with an empty ViewManager underneath.
 
     This is useful for debugging simple applications from the REPL.
     """
-    vm = ViewManager(ViewTransitionBlend())
-    vm.push(v)
-    reactor = _make_reactor()
-    compositor = _make_compositor(reactor, vm)
-    top = processors.ProcessorMidldeware(compositor)
-    reactor.set_top(top)
-    reactor.run()
+    run_views([v])
 
 
 def _yeet_local_changes() -> None:
@@ -131,6 +139,8 @@ def _yeet_local_changes() -> None:
 
 
 def run_main() -> None:
+    global override_main_app
+
     log.info(f"starting main")
     log.info(f"free memory: {gc.mem_free()}")
 
@@ -172,18 +182,24 @@ def run_main() -> None:
             MenuItemForeground("System", menu_system),
         ],
     )
+    # If we're not overriding main app, try to override with auto boot app instead
+    if override_main_app is None:
+        override_main_app = settings.str_auto_boot_app.value
+
     if override_main_app is not None:
         requested = [b for b in bundles.bundles.values() if b.name == override_main_app]
         if len(requested) > 1:
-            raise Exception(f"More than one bundle named {override_main_app}")
-        if len(requested) == 0:
-            raise Exception(f"Requested bundle {override_main_app} not found")
-        run_view(requested[0].load())
+            print(f"More than one bundle named {override_main_app}")
+        elif len(requested) == 0:
+            print(f"Requested bundle {override_main_app} not found")
+        else:
+            run_views([menu_main, requested[0].load()])
     run_view(menu_main)
 
 
 __all__ = [
     "run_responder",
     "run_view",
+    "run_views",
     "run_main",
 ]
