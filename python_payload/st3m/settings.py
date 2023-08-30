@@ -333,6 +333,7 @@ onoff_wifi_preference = OnOffTunable(
 str_wifi_ssid = StringTunable("WiFi SSID", "system.wifi.ssid", "Camp2023-open")
 str_wifi_psk = ObfuscatedStringTunable("WiFi Password", "system.wifi.psk", None)
 str_hostname = StringTunable("Hostname", "system.hostname", "flow3r")
+str_auto_boot_app = StringTunable("Auto Boot App", "system.auto_boot_app", None)
 
 # List of all settings to be loaded/saved
 load_save_settings: List[UnaryTunable] = [
@@ -346,6 +347,7 @@ load_save_settings: List[UnaryTunable] = [
     str_wifi_ssid,
     str_wifi_psk,
     str_hostname,
+    str_auto_boot_app,
 ]
 
 
