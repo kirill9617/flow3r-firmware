@@ -97,17 +97,23 @@ class ScalarApp(Application):
         self.mods = [self.blm.new(bl00mbox.plugins.range_shifter) for i in range(10)]
         self.mods2 = [self.blm.new(bl00mbox.plugins.range_shifter) for i in range(10)]
         self.mod = self.blm.new(bl00mbox.plugins.range_shifter)
+        self.mod2 = self.blm.new(bl00mbox.plugins.range_shifter)
         self.synth_mixer = self.blm.new(bl00mbox.plugins.mixer, 10)
         self.synth_delay = self.blm.new(bl00mbox.plugins.delay)
         self.synth_lp = self.blm.new(bl00mbox.plugins.filter)
         self.synth_comb = self.blm.new(bl00mbox.plugins.flanger)
         self.synth_delay.signals.input = self.synth_mixer.signals.output
-        self.synth_comb.signals.manual = self.noise_vol_amp.signals.output
         self.synth_comb.signals.input = self.synth_delay.signals.output
         self.synth_lp.signals.input = self.synth_comb.signals.output
         self.synth_lp.signals.output = self.blm.mixer
 
         self.mod.signals.speed.switch.SLOW = True
+        self.mod2.signals.speed.switch.SLOW = True
+        self.mod2.signals.input_range[0] = 28000
+        self.mod2.signals.input_range[1] = 18000
+        self.mod2.signals.output_range[0] = 18000
+        self.mod2.signals.output_range[1] = 28000
+        self.mod2.signals.input = self.mod.signals.output
         for i in range(len(self.oscs)):
             self.mods[i].signals.speed.switch.SLOW = True
             self.mods2[i].signals.speed.switch.SLOW = True
@@ -304,12 +310,15 @@ class ScalarApp(Application):
             self.noise_vol_amp.signals.output_range[0] = 18
             self.noise_vol_amp.signals.output_range[1] = 48
             self.synth_comb.signals.mix = -8000
+            self.synth_comb.signals.manual = self.noise_vol_amp.signals.output
             self.synth_lp.signals.cutoff.freq = 2100
             self.synth_lp.signals.reso = 2000
             self.synth_lp.signals.gain = 16000
             self.synth_delay.signals.time = 69
             self.synth_delay.signals.level = 6969
+            self.synth_lp.signals.mix = 32767
             self.synth_delay.signals.feedback = 420
+            self.synth_lp.signals.mode.switch.LOWPASS = True
 
         elif self._synth_sound_name == "square":
             for i in range(len(self.oscs)):
@@ -327,6 +336,8 @@ class ScalarApp(Application):
             self.synth_lp.signals.cutoff.freq = 15000
             self.synth_lp.signals.reso = 2000
             self.synth_lp.signals.gain = 3000
+            self.synth_lp.signals.mix = 32767
+            self.synth_lp.signals.mode.switch.LOWPASS = True
 
         elif self._synth_sound_name == "tri":
             for i in range(len(self.oscs)):
@@ -345,7 +356,9 @@ class ScalarApp(Application):
             self.synth_comb.signals.mix = 0
             self.synth_lp.signals.cutoff.freq = 15000
             self.synth_lp.signals.reso = 2000
+            self.synth_lp.signals.mix = 32767
             self.synth_lp.signals.gain = 12800
+            self.synth_lp.signals.mode.switch.LOWPASS = True
 
         elif self._synth_sound_name == "delay":
             for i in range(len(self.oscs)):
@@ -364,14 +377,18 @@ class ScalarApp(Application):
             self.synth_lp.signals.cutoff.freq = 8000
             self.synth_lp.signals.reso = 2000
             self.synth_lp.signals.gain = 7200
+            self.synth_lp.signals.mix = 32767
+            self.synth_lp.signals.mode.switch.LOWPASS = True
             self.synth_delay.signals.time = 420
             self.synth_delay.signals.level = 16000
             self.synth_delay.signals.feedback = 25000
 
         elif self._synth_sound_name == "filter":
             for i in range(len(self.oscs)):
+                self.mods[i].signals.output_range[0] = 32767
+                self.mods[i].signals.output_range[1] = 10922
+                self.mods[i].signals.output = self.oscs[i].signals.waveform
                 self.oscs[i].signals.morph = 0
-                self.oscs[i].signals.waveform.switch.SAW = True
                 self.envs[i].signals.attack = 20
                 self.envs[i].signals.sustain = 26000
                 self.envs[i].signals.release = 200
@@ -380,11 +397,14 @@ class ScalarApp(Application):
             self.noise_fm_lp.signals.gain = 0
             self.noise_vol_amp.signals.output_range[0] = 0
             self.noise_vol_amp.signals.output_range[1] = 0
-            self.synth_comb.signals.mix = 0
+            self.synth_comb.signals.mix = 16000
+            self.synth_comb.signals.manual = self.mod2.signals.output
             self.mod.signals.output_range[0] = 19000
-            self.mod.signals.output_range[1] = 29000
+            self.mod.signals.output_range[1] = 27000
             self.synth_lp.signals.cutoff = self.mod.signals.output
-            self.synth_lp.signals.reso = 16000
+            self.synth_lp.signals.reso = 14000
+            self.synth_lp.signals.mode.switch.HIGHPASS = True
+            self.synth_lp.signals.mix = -20000
             self.synth_lp.signals.gain = 8000
             self.synth_delay.signals.level = 0
 
@@ -547,14 +567,11 @@ class ScalarApp(Application):
         cv_list = []
         for i in range(10):
             if cts.petals[i].pressed:
-                slew = 12000
                 p = ins.captouch.petals[i].position[0]
                 p = p * abs(p) / 40000
-                p -= self.mods[i].signals.input.value
-                p = max(-slew, min(slew, p))
-                p += self.mods[i].signals.input.value
+                p = 0.3 * p + 0.7 * self.mods[i].signals.input.value
                 p = max(-32767, min(32767, p))
-                self.mods[i].signals.input = p
+                self.mods[i].signals.input = int(p)
                 cv_list += [p]
 
             press_event = (
@@ -594,7 +611,11 @@ class ScalarApp(Application):
                         self.noise_env.signals.trigger.stop()
         self._ui_cap_prev = cts
         if cv_list:
-            self.mod.signals.input = sum(cv_list) / len(cv_list)
+            p = sum(cv_list) / len(cv_list)
+            p = p * abs(p) / 40000
+            p = 0.3 * p + 0.7 * self.mod.signals.input.value
+            p = max(-32767, min(32767, p))
+            self.mod.signals.input = int(p)
 
 
 if __name__ == "__main__":
