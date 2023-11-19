@@ -44,9 +44,11 @@ class Calibration(BaseView):
         ctx.font_size = 20
         pos = -55
         ctx.move_to(0, pos)
+        ctx.font = "Arimo Bold"
         ctx.text("calibration mode")
         pos += 30
         ctx.move_to(0, pos)
+        ctx.font = "Arimo"
         ctx.text("do not touch the petals")
         pos += 20
         ctx.move_to(0, pos)
