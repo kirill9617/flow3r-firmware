@@ -25,6 +25,8 @@ import os
 import machine
 import network
 
+import json
+
 
 log = logging.Log(__name__, level=logging.INFO)
 
@@ -136,11 +138,23 @@ def _yeet_local_changes() -> None:
     machine.reset()
 
 
+def _load_captouch_calibration():
+    path = "/flash/captouch_calib.json"
+    try:
+        with open(path, "r") as f:
+            calib_data = json.load(f)
+            assert len(calib_data) == 52
+            captouch.calibration_set_data(calib_data)
+            log.info(f"captouch calibration data found at {path}")
+            return True
+    except (OSError, AssertionError, ValueError):
+        log.info(f"no captouch calibration data found")
+        return False
+
+
 def run_main() -> None:
     log.info(f"starting main")
     log.info(f"free memory: {gc.mem_free()}")
-
-    captouch.calibration_request()
 
     audio.headphones_set_volume_dB(settings.num_headphones_startup_volume_db.value)
     audio.speaker_set_volume_dB(settings.num_speaker_startup_volume_db.value)
@@ -184,7 +198,16 @@ def run_main() -> None:
     bundles = BundleManager()
     bundles.update()
 
-    if override_main_app is not None:
+    # TODO: make override_main_app work properly when no calibration could be loaded
+    # ...but never skip captouch calibrator if no calibration has been found!
+    if not _load_captouch_calibration():
+        calibration_app_bundle = [
+            b for b in bundles.bundles.values() if b.name == "captouch calibrator"
+        ][0]
+        calibration_app_class = calibration_app_bundle.load()
+        calibration_app_class.sunmenu_bundles = bundles
+        run_view(calibration_app_class, debug_vm=False)
+    elif override_main_app is not None:
         requested = [b for b in bundles.bundles.values() if b.name == override_main_app]
         if len(requested) > 1:
             raise Exception(f"More than one bundle named {override_main_app}")

@@ -1,0 +1,11 @@
+[app]
+name = "captouch calibrator"
+category = "Hidden"
+
+[entry]
+class = "CaptouchCalibrator"
+
+[metadata]
+author = "Flow3r Badge Authors"
+license = "LGPL-3.0-only"
+url = "https://git.flow3r.garden/flow3r/flow3r-firmware"
