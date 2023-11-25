@@ -1,4 +1,5 @@
 import os
+import gc
 import media
 
 from ctx import Context
@@ -21,6 +22,7 @@ class Reader(ActionView):
     has_error: bool = False
     is_media: bool = False
     content: str
+    error_message: str
     viewport_offset = (0.0, 0.0)
     zoom_enabled = False
 
@@ -34,6 +36,7 @@ class Reader(ActionView):
         update_path: Callable[[str], None],
     ) -> None:
         super().__init__()
+        gc.collect()
 
         self.scroll_x = CapScrollController()
         self.scroll_y = CapScrollController()
@@ -158,9 +161,9 @@ class Reader(ActionView):
         ctx.move_to(0, -10)
         ctx.text("Can't read file")
 
-        if not self.is_media:
+        if not self.is_media and self.error_message:
             ctx.move_to(0, 20)
-            ctx.text("(Not UTF-8?)")
+            ctx.text(self.error_message)
 
         ctx.restore()
 
@@ -175,7 +178,7 @@ class Reader(ActionView):
         else:
             ctx.font_size = 16
         ctx.move_to(self.viewport_offset[0], self.viewport_offset[1])
-        ctx.text(f"{self.content}")
+        ctx.text(self.content)
         ctx.restore()
 
     def _draw_media(self, ctx: Context) -> None:
@@ -196,16 +199,22 @@ class Reader(ActionView):
         try:
             with open(self.path, "r", encoding="utf-8") as f:
                 self.content = f.read()
-        except:
+        except Exception:
             self.has_error = True
 
     def _check_file(self) -> bool:
+        # Disallow files above 10KiB to avoid crashes
+        if os.stat(self.path)[6] > 10 * 1024:
+            self.error_message = "(Too big, >10KiB)"
+            return False
+
         # Dumb way to check if file is UTF-8 only
         try:
             with open(self.path, "r", encoding="utf-8") as f:
                 f.read(100)
             return True
         except UnicodeError:
+            self.error_message = "(Not UTF-8?)"
             return False
 
     def _is_media(self) -> bool:
@@ -215,5 +224,6 @@ class Reader(ActionView):
         return False
 
     def on_exit(self):
+        gc.collect()
         if self.is_media:
             media.stop()
