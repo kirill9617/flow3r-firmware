@@ -105,7 +105,6 @@ class ScalarApp(Application):
         self.synth_delay.signals.input = self.synth_mixer.signals.output
         self.synth_comb.signals.input = self.synth_delay.signals.output
         self.synth_lp.signals.input = self.synth_comb.signals.output
-        self.synth_lp.signals.output = self.blm.mixer
 
         self.mod.signals.speed.switch.SLOW = True
         self.mod2.signals.speed.switch.SLOW = True
@@ -163,7 +162,28 @@ class ScalarApp(Application):
         self.noise_env.signals.release = 50
         self.noise_env.signals.gain = self.noise_vol_amp.signals.output
         self.noise_env.signals.input = self.noise_lp.signals.output
-        self.noise_env.signals.output = self.blm.mixer
+
+        self.main_mixer = self.blm.new(bl00mbox.plugins.mixer, 2)
+        self.main_comp = self.blm.new(bl00mbox.plugins.distortion)
+        self.main_mixer.signals.input[1] = self.noise_env.signals.output
+        self.main_mixer.signals.input[0] = self.synth_lp.signals.output
+        self.main_mixer.signals.gain.dB = 0
+        self.main_comp.signals.input = self.main_mixer.signals.output
+        self.main_comp.curve = [
+            -32767,
+            -31000,
+            -27000,
+            -18000,
+            -9000,
+            0,
+            9000,
+            18000,
+            27000,
+            31000,
+            32767,
+        ]
+        self.main_comp.signals.output = self.blm.mixer
+        # self.main_mixer.signals.output = self.blm.mixer
         self._set_sound(self._synth_sound_index)
 
     def _load_user_settings(self):
