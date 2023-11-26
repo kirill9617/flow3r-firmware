@@ -9,6 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### Added
 
 ### Changed
+- settings: "Enable WiFi on Boot" option is now "Always-On Wi-Fi" (but is functionally identical), should help reduce confusion about Wi-Fi turning off automatically
 
 ### Fixed
 - updat3r: Improved version comparison logic, making the "you are up to date :)" logic work

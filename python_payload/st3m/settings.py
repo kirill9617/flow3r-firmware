@@ -200,9 +200,9 @@ onoff_debug = OnOffTunable("Debug Overlay", "system.debug", False)
 onoff_debug_touch = OnOffTunable("Touch Overlay", "system.debug_touch", False)
 onoff_debug_ftop = OnOffTunable("Debug: ftop", "system.ftop_enabled", False)
 onoff_show_tray = OnOffTunable("Show Icons", "system.show_icons", True)
-onoff_wifi = OnOffTunable("Enable WiFi on Boot", "system.wifi.enabled", False)
+onoff_wifi = OnOffTunable("Always-On Wi-Fi", "system.wifi.enabled", False)
 onoff_wifi_preference = OnOffTunable(
-    "Let apps change WiFi", "system.wifi.allow_apps_to_change_wifi", True
+    "Let apps change Wi-Fi", "system.wifi.allow_apps_to_change_wifi", True
 )
 str_wifi_ssid = StringTunable("WiFi SSID", "system.wifi.ssid", None)
 str_wifi_psk = ObfuscatedStringTunable("WiFi Password", "system.wifi.psk", None)
