@@ -7,6 +7,7 @@ import sys_kernel
 import urequests
 import math
 import sys
+import re
 from st3m.ui.view import ViewManager
 import st3m.wifi
 
@@ -62,11 +63,15 @@ class UpdaterApp(Application):
             ctx.move_to(0, 55)
             ctx.text("enter Wi-Fi settings")
 
-    def version_to_number(self, version: str):
-        if "dev" in version:
+    def version_to_number(self, version_raw: str):
+        if "dev" in version_raw:
             return 0
 
-        major, minor, patch = version.split(".")
+        version_re = re.search("[0-9]+.[0-9]+.[0-9]+", version_raw)
+        if not version_re:
+            return 0
+
+        major, minor, patch = version_re.group(0).split(".")
 
         try:
             version_number = (int(major) * 1000000) + (int(major) * 1000) + int(patch)
@@ -151,9 +156,7 @@ class UpdaterApp(Application):
             self._state_text = "latest dev build\n\npress app shoulder button\nto start downloading\n\n(tilt shoulder left to\nswitch to latest version)"
         elif self.fetched_version:
             self.selected_version = self.fetched_version[0]
-            latest_version_number = self.version_to_number(
-                self.selected_version["tag"].replace("v", "")
-            )
+            latest_version_number = self.version_to_number(self.selected_version["tag"])
             self._state_text = f"latest version: \n{self.selected_version['name']}"
             if latest_version_number > self._firmware_version_number:
                 self._state_text += (
@@ -168,7 +171,6 @@ class UpdaterApp(Application):
         super().think(ins, delta_ms)
 
         # TODO: verify hash
-        # TODO: download percentage
 
         if self.input.buttons.app.right.pressed:
             self.use_dev_version = True

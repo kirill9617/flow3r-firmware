@@ -4,10 +4,20 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [Unreleased]
+
+### Added
+
+### Changed
+
+### Fixed
+- updat3r: Improved version comparison logic, making the "you are up to date :)" logic work
+
 ## [1.3.0] - 2023-11-26
 ### Summary
 - Wifi connection UI
 - Media framework
+- SD card works reliably
 - Performance improvements
 - Backend improvements
 - Wider micropython API
