@@ -17,6 +17,7 @@ User manual
 * :ref:`Music <usage_music>`
 * :ref:`Apps <usage_apps>`
 * :ref:`System <usage_system>`
+* :ref:`Updating firmware <updating_firmware>`
 
 .. toctree::
    :maxdepth: 1
