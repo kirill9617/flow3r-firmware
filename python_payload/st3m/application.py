@@ -15,12 +15,14 @@ from st3m.ui import led_patterns
 import leds
 
 import toml
+import io
 import os
 import os.path
 import stat
 import sys
 import sys_display
 import random
+import time
 from math import sin
 
 log = Log(__name__)
@@ -69,11 +71,14 @@ class Application(BaseView):
 class BundleLoadException(BaseException):
     MSG = "failed to load"
 
-    def __init__(self, msg: Optional[str] = None) -> None:
+    def __init__(
+        self, msg: Optional[str] = None, orig_exc: Optional[Exception] = None
+    ) -> None:
         res = self.MSG
         if msg is not None:
             res += ": " + msg
         self.msg = res
+        self.orig_exc = orig_exc
         super().__init__(res)
 
 
@@ -201,7 +206,7 @@ class BundleMetadata:
             return inst  # type: ignore
         except Exception as e:
             self._sys_path_set(old_sys_path)
-            raise BundleLoadException(f"load error: {e}")
+            raise BundleLoadException(f"load error: {e}", e)
 
     def load(self) -> Application:
         """
@@ -245,10 +250,33 @@ class BundleMetadata:
 
 
 class LoadErrorView(BaseView):
-    def __init__(self, e: BundleLoadException) -> None:
+    def __init__(self, e: BaseException) -> None:
         super().__init__()
         self.e = e
         self.header = "oh no"
+
+        self.lines: List[List[str]] = []
+
+        stringio = io.StringIO()
+        sys.print_exception(self.e, stringio)
+        msg = stringio.getvalue()
+
+        for line in msg.split("\n"):
+            for word in line.split():
+                if len(self.lines) == 0:
+                    self.lines.append([word])
+                    continue
+                lastline = self.lines[-1][:]
+                lastline.append(word)
+                if sum(len(l) for l in lastline) + len(lastline) - 1 > 35:
+                    self.lines.append([word])
+                else:
+                    self.lines[-1].append(word)
+            self.lines.append([])
+
+        self.scroll_pos = 0
+        self.max_lines = 9
+        self.scroll_max = len(self.lines) - self.max_lines
 
     def on_enter(self, vm: Optional[ViewManager]) -> None:
         self.header = random.choice(
@@ -262,7 +290,14 @@ class LoadErrorView(BaseView):
         )
 
     def think(self, ins: InputState, delta_ms: int) -> None:
-        pass
+        super().think(ins, delta_ms)
+
+        direction = ins.buttons.app
+
+        if direction == ins.buttons.PRESSED_LEFT or ins.captouch.petals[0].pressed:
+            self.scroll_pos = max(0, self.scroll_pos - delta_ms / 100)
+        elif direction == ins.buttons.PRESSED_RIGHT or ins.captouch.petals[5].pressed:
+            self.scroll_pos = min(self.scroll_max, self.scroll_pos + delta_ms / 100)
 
     def draw(self, ctx: Context) -> None:
         ctx.rgb(0.8, 0.1, 0.1)
@@ -276,19 +311,6 @@ class LoadErrorView(BaseView):
         ctx.move_to(0, -70)
         ctx.text(self.header)
 
-        lines: List[List[str]] = []
-        msg = self.e.msg
-        for word in msg.split():
-            if len(lines) == 0:
-                lines.append([word])
-                continue
-            lastline = lines[-1][:]
-            lastline.append(word)
-            if sum(len(l) for l in lastline) + len(lastline) - 1 > 30:
-                lines.append([word])
-            else:
-                lines[-1].append(word)
-
         ctx.gray(0)
         ctx.rectangle(-120, -60, 240, 240).fill()
         y = -40
@@ -296,10 +318,31 @@ class LoadErrorView(BaseView):
         ctx.font_size = 15
         ctx.font = "Arimo Regular"
         ctx.text_align = ctx.LEFT
-        for line in lines:
-            ctx.move_to(-90, y)
+
+        view_start = max(0, int(self.scroll_pos))
+        view_end = min(len(self.lines), view_start + self.max_lines)
+
+        for line in self.lines[view_start:view_end]:
+            ctx.move_to(-100, y)
             ctx.text(" ".join(line))
             y += 15
+
+        ctx.font = "Material Icons"
+        ctx.text_align = ctx.CENTER
+
+        animation = ((time.ticks_ms() / 69) % 20) - 10
+        if animation < 10:
+            animation = -animation
+        animation *= animation / 10
+        animation = 10 - animation
+
+        if view_end < len(self.lines):
+            ctx.move_to(0, 120 - animation / 2)
+            ctx.text("\ue5db")
+
+        if view_start > 0:
+            ctx.move_to(0, -105 + animation / 2)
+            ctx.text("\ue5d8")
 
 
 class MenuItemAppLaunch(MenuItem):
@@ -325,6 +368,8 @@ class MenuItemAppLaunch(MenuItem):
                 self._instance = self._bundle.load()
             except BundleLoadException as e:
                 log.error(f"Could not load {self.label()}: {e}")
+                if getattr(e, "orig_exc"):
+                    e = e.orig_exc
                 sys.print_exception(e)
                 err = LoadErrorView(e)
                 vm.push(err)
