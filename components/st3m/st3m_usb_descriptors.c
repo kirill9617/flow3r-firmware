@@ -45,8 +45,8 @@ static st3m_usb_descriptor_set_t _descset_app = {
             .bDeviceProtocol = MISC_PROTOCOL_IAD,
             .bMaxPacketSize0 = CFG_TUD_ENDPOINT0_SIZE,
 
-            .idVendor = 0x303a,
-            .idProduct = 0x4042,
+            .idVendor = 0x1209,
+            .idProduct = 0xF103,
             .bcdDevice = 0x0100,
 
             .iManufacturer = 0x01,
@@ -94,8 +94,8 @@ static st3m_usb_descriptor_set_t _descset_disk = {
             .bDeviceProtocol = 0x00,
 
             .bMaxPacketSize0 = CFG_TUD_ENDPOINT0_SIZE,
-            .idVendor = 0x303a,
-            .idProduct = 0x4023,
+            .idVendor = 0x1209,
+            .idProduct = 0xF10B,
 
             .bcdDevice = 0x0100,
 
