@@ -299,7 +299,7 @@ void flow3r_bsp_max98091_read_jacksense(
             st->headset = false;
             return;
         case 2:
-            st->headphones = true;
+            st->headphones = false;
             st->headset = true;
     }
 }
