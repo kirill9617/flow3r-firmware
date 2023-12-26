@@ -41,6 +41,7 @@ User manual
    badge/badge_net.rst
    badge/bl00mbox.rst
    badge/fonts.rst
+   badge/qwiic.rst
 
 .. toctree::
    :maxdepth: 1
