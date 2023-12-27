@@ -216,8 +216,13 @@ static void _audio_speaker_apply(st3m_audio_output_t *out) {
 typedef struct {
     flow3r_bsp_audio_jacksense_state_t jacksense;
 
-    // True if system should pretend headphones are plugged in.
+    // True if system should ignore jacksense and use
+    // headphones_detection_override_state to determine
+    // whether headphones are connected (true) or not (false)
     bool headphones_detection_override;
+
+    // Defaults to true
+    bool headphones_detection_override_state;
 
     // The two output channels.
     st3m_audio_output_t headphones;
@@ -262,6 +267,7 @@ static st3m_audio_state_t state = {
             .line_in = false,
         },
     .headphones_detection_override = false,
+    .headphones_detection_override_state = true,
     .headphones =
         {
             .volume = 0,
@@ -310,7 +316,10 @@ static st3m_audio_state_t state = {
 //
 // Lock must be taken.
 static bool _headphones_connected(void) {
-    return state.jacksense.headphones || state.headphones_detection_override;
+    if (state.headphones_detection_override) {
+        return state.headphones_detection_override_state;
+    }
+    return state.jacksense.headphones;
 }
 
 static void _audio_input_set_source(st3m_audio_input_source_t source) {
@@ -915,9 +924,11 @@ float st3m_audio_headphones_set_volume_dB(float vol_dB) {
     LOCKED(float, _output_set_volume(&state.headphones, vol_dB));
 }
 
-void st3m_audio_headphones_detection_override(bool enable) {
+void st3m_audio_headphones_detection_override(bool enable,
+                                              bool override_state) {
     LOCK;
     state.headphones_detection_override = enable;
+    state.headphones_detection_override_state = override_state;
     _output_apply(&state.headphones);
     _output_apply(&state.speaker);
     UNLOCK;

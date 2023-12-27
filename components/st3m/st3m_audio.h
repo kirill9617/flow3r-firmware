@@ -76,12 +76,19 @@ bool st3m_audio_headset_is_connected(void);
 /* Returns true if the line-in jack is connected to a cable. */
 bool st3m_audio_line_in_is_connected(void);
 
-/* If a sleeve contact mic doesn't pull the detection pin low enough the
- * codec's built in headphone detection might fail. Calling this function
- * with 'enable = 1' overrides the detection and assumes there's headphones
- * plugged in. Call with 'enable = 0' to revert to automatic detection.
+/* Set to 'enable = 1' if the system should ignore jacksense and use
+ * headphones_detection_override_state to determine whether headphones are
+ * connected (true) or not (false).
+ *
+ * Use cases:
+ * - If a sleeve contact mic doesn't pull the detection pin low enough the
+ *   codec's built in headphone detection might fail.
+ * - If the headset only has a mic connected but we wish to use the internal
+ *   speaker anyway
+ *
+ * Call with 'enable = 0' to revert to automatic detection.
  */
-void st3m_audio_headphones_detection_override(bool enable);
+void st3m_audio_headphones_detection_override(bool enable, bool override_state);
 
 /* Attempts to set target volume for the headphone output/onboard speakers
  * respectively, clamps/rounds if necessary and returns the actual volume.

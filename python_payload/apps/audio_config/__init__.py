@@ -334,12 +334,12 @@ class SpeakerMenu(Submenu):
 class HeadphonesMenu(Submenu):
     def __init__(self, press):
         super().__init__(press)
-        self.num_widgets = 5
-        self.overhang = -40
+        self.num_widgets = 6
+        self.overhang = -80
         self.mid_x = 50
-        self.focus_pos_limit_min = -100
+        self.focus_pos_limit_min = -20
         self.focus_pos_limit_max = 100
-        self.focus_pos_limit_first = -100
+        self.focus_pos_limit_first = -40
         self.focus_pos_limit_last = 100
 
     def _draw(self, ctx):
@@ -376,6 +376,43 @@ class HeadphonesMenu(Submenu):
             settings.num_headphones_max_db.set_value(
                 audio.headphones_get_maximum_volume_dB()
             )
+
+        self.y += 8
+
+        # note: jack detection is the inverse of headphones detection override
+        # jack detection off means headphones detection override on
+        tmp = self.draw_boolean(
+            "jack detection",
+            settings.onoff_headphones_detection_override.value,
+            off_str="on",  # sic
+            on_str="off",  # sic
+        )
+        if settings.onoff_headphones_detection_override.value != tmp:
+            settings.onoff_headphones_detection_override.set_value(tmp)
+            audio.headphones_detection_override(
+                settings.onoff_headphones_detection_override.value,
+                settings.onoff_headphones_detection_override_state.value,
+            )
+
+        if tmp:
+            self.num_widgets = 7
+            tmp = self.draw_boolean(
+                "headphone state",
+                settings.onoff_headphones_detection_override_state.value,
+                on_str="on",
+                off_str="off",
+                on_hint="sound will always play\nthrough headphones",
+                off_hint="sound will always play\nthrough speaker",
+            )
+            if settings.onoff_headphones_detection_override_state.value != tmp:
+                settings.onoff_headphones_detection_override_state.set_value(tmp)
+                audio.headphones_detection_override(
+                    settings.onoff_headphones_detection_override.value,
+                    settings.onoff_headphones_detection_override_state.value,
+                )
+        else:
+            self.num_widgets = 6
+            self.overhang = -80
 
 
 class VolumeControlMenu(Submenu):

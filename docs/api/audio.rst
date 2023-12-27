@@ -152,16 +152,28 @@ in the user config.
 OS development
 --------------
 
+.. warning::
+
+   These functions are not to be used in applications, but only by OS settings.
+
 Many of these functions are available in three variants: headphone volume,
 speaker volume, and volume. If :code:`headphones_are_connected()` returns 1
 the "headphone" variant is chosen, else the "speaker" variant is chosen.
 
-.. py:function:: headphones_detection_override(enable : bool)
+.. py:function:: headphones_detection_override(enable : bool, override_state : bool)
 
-   If a sleeve contact mic doesn't pull the detection pin low enough the
-   codec's built in headphone detection might fail. Calling this function
-   with 'enable = 1' overrides the detection and assumes there's headphones
-   plugged in. Call with 'enable = 0' to revert to automatic detection.
+   Set to 'enable = True' if the system should ignore jacksense and use
+   override_state to determine whether headphones are connected (True) or not
+   (False).
+
+   Use cases:
+
+   - If a sleeve contact mic doesn't pull the detection pin low enough the
+     codec's built in headphone detection might fail.
+   - If the headset only has a mic connected but we wish to use the internal
+     speaker anyway
+
+   Call with 'enable = 0' to revert to automatic detection.
 
 .. py:function:: headphones_set_volume_dB(vol_dB : float) -> float
 .. py:function:: speaker_set_volume_dB(vol_dB : float) -> float

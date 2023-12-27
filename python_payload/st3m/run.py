@@ -159,6 +159,11 @@ def run_main() -> None:
     audio.onboard_mic_to_speaker_set_allowed(
         settings.onoff_onboard_mic_to_speaker_allowed.value
     )
+    if settings.onoff_headphones_detection_override.value:
+        audio.headphones_detection_override(
+            settings.onoff_headphones_detection_override.value,
+            settings.onoff_headphones_detection_override_state.value,
+        )
 
     leds.set_brightness(settings.num_leds_brightness.value)
     sys_display.set_backlight(settings.num_display_brightness.value)

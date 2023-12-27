@@ -255,6 +255,16 @@ onoff_onboard_mic_to_speaker_allowed = OnOffTunable(
     "system.audio.onboard_mic_to_speaker_allowed",
     False,
 )
+onoff_headphones_detection_override = OnOffTunable(
+    "Headphones detection override enabled",
+    "system.audio.headphones_detection_override",
+    False,
+)
+onoff_headphones_detection_override_state = OnOffTunable(
+    "Headphones detection override state",
+    "system.audio.headphones_detection_override_state",
+    True,
+)
 
 num_headset_mic_gain_db = NumberTunable(
     "Headset Mic Gain dB", "system.audio.headset_mic_gain_dB", 0
@@ -306,6 +316,8 @@ load_save_settings: List[UnaryTunable] = [
     onoff_onboard_mic_allowed,
     onoff_line_in_allowed,
     onoff_onboard_mic_to_speaker_allowed,
+    onoff_headphones_detection_override,
+    onoff_headphones_detection_override_state,
     num_headset_mic_gain_db,
     num_onboard_mic_gain_db,
     num_line_in_gain_db,

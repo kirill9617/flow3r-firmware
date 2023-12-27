@@ -28,12 +28,20 @@ STATIC mp_obj_t mp_headphones_are_connected() {
 STATIC MP_DEFINE_CONST_FUN_OBJ_0(mp_headphones_are_connected_obj,
                                  mp_headphones_are_connected);
 
-STATIC mp_obj_t mp_headphones_detection_override(mp_obj_t enable) {
-    st3m_audio_headphones_detection_override(mp_obj_get_int(enable));
+STATIC mp_obj_t mp_headphones_detection_override(size_t n_args,
+                                                 const mp_obj_t *args) {
+    bool enable = mp_obj_get_int(args[0]);
+    bool override_state = true;
+    if (n_args > 1) {
+        override_state = mp_obj_get_int(args[1]);
+    }
+
+    st3m_audio_headphones_detection_override(enable, override_state);
     return mp_const_none;
 }
-STATIC MP_DEFINE_CONST_FUN_OBJ_1(mp_headphones_detection_override_obj,
-                                 mp_headphones_detection_override);
+STATIC MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mp_headphones_detection_override_obj,
+                                           1, 2,
+                                           mp_headphones_detection_override);
 
 STATIC mp_obj_t mp_headphones_set_volume_dB(mp_obj_t vol_dB) {
     return mp_obj_new_float(
