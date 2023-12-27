@@ -35,23 +35,17 @@ Here is a picture of the unpopulated backside footprint with the pinout overlaye
 
 .. image:: assets/qwiic_pinout_overlay.jpg
     :alt: The backside with the pinout overlayed. From left to right: SCL, SDA, 3V3, GND
-    :width: 80%
-    :align: left
 
 
 And here the excerpt from the schematic, note that there are no fixed pull ups soldered by default so you can use it with other buses without issues.
 
 .. image:: assets/qwiic_schematic.png
-   :width: 80%
-   :align: left
 
 And on the inside you can find the populated connector above the ESP32-S3.
 You can modify the 3D printed spacer with a bit of sand paper by either making the battery cable slot larger or by adding a new slot where desired.
 Or modify the source files and print your own spacer that accommodates your needs.
 
 .. image:: assets/qwiic_inside.jpg
-   :width: 80%
-   :align: left
 
 
 
@@ -92,5 +86,3 @@ The original part number for the SMT PCB connector is **SM04B-SRSS-TB(LF)(SN)** 
 There are also vertical versions but they are not fully compatible with the footprint on the flow3r as the mechanical pads are not in the same place.
 
 .. image:: assets/qwiic-cables.jpg
-   :width: 80%
-   :align: left
