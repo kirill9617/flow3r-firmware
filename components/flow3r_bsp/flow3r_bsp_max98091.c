@@ -1,5 +1,7 @@
 #include "flow3r_bsp_max98091.h"
 
+#include <sys/param.h>
+
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -167,6 +169,34 @@ void flow3r_bsp_max98091_set_speaker_eq(bool enable) {
         }
     }
     max98091_check(0x41, 1);
+}
+
+void flow3r_bsp_max98091_configure_dynamic_range_control(
+    bool enable, uint8_t attack, uint8_t release, uint8_t make_up_gain_dB,
+    uint8_t comp_ratio, uint8_t comp_threshold_dB, uint8_t exp_ratio,
+    uint8_t exp_threshold_dB) {
+    if (!enable) {
+        max98091_check(MAX98091_DRC_TIMING, 0);
+        return;
+    }
+
+    // clamp some values to datasheet ranges
+    attack = MIN(7, attack);
+    release = MIN(7, release);
+    make_up_gain_dB = MIN(12, make_up_gain_dB);
+    comp_ratio = MIN(4, comp_ratio);
+    comp_threshold_dB = MIN(31, comp_threshold_dB);
+    exp_ratio = MIN(2, exp_ratio);
+
+    // the range for this one is -35 to -66dB
+    uint8_t exp_threshold_internal = MIN(31, MAX(35, exp_threshold_dB) - 35);
+
+    max98091_check(MAX98091_DRC_TIMING, attack | release << 4 | enable << 7);
+    max98091_check(MAX98091_DRC_GAIN, make_up_gain_dB);
+    max98091_check(MAX98091_DRC_COMPRESSOR,
+                   comp_threshold_dB | comp_ratio << 5);
+    max98091_check(MAX98091_DRC_EXPANDER,
+                   exp_threshold_internal | exp_ratio << 5);
 }
 
 void flow3r_bsp_max98091_register_poke(uint8_t reg, uint8_t data) {

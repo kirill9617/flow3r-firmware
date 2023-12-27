@@ -429,6 +429,24 @@ STATIC MP_DEFINE_CONST_FUN_OBJ_0(mp_onboard_mic_to_speaker_get_allowed_obj,
                                  mp_onboard_mic_to_speaker_get_allowed);
 // </INPUT SETUP>
 
+STATIC mp_obj_t mp_codec_configure_dynamic_range_control(size_t n_args,
+                                                         const mp_obj_t *args) {
+    flow3r_bsp_max98091_configure_dynamic_range_control(
+        (bool)mp_obj_get_int(args[0]),          // enable
+        (uint8_t)mp_obj_get_int(args[1]),       // attack
+        (uint8_t)mp_obj_get_int(args[2]),       // release
+        (uint8_t)mp_obj_get_int(args[3]),       // make_up_gain_dB
+        (uint8_t)mp_obj_get_int(args[4]),       // comp_ratio
+        (uint8_t)abs(mp_obj_get_int(args[5])),  // comp_threshold_dB
+        (uint8_t)mp_obj_get_int(args[6]),       // exp_ratio
+        (uint8_t)abs(mp_obj_get_int(args[7]))   // exp_threshold_dB
+    );
+    return mp_const_none;
+}
+STATIC MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(
+    mp_codec_configure_dynamic_range_control_obj, 8, 8,
+    mp_codec_configure_dynamic_range_control);
+
 STATIC mp_obj_t mp_codec_i2c_write(mp_obj_t reg_in, mp_obj_t data_in) {
 #if defined(CONFIG_FLOW3R_HW_GEN_P3) || defined(CONFIG_FLOW3R_HW_GEN_P4) || \
     defined(CONFIG_FLOW3R_HW_GEN_C23)
@@ -569,6 +587,9 @@ STATIC const mp_rom_map_elem_t mp_module_audio_globals_table[] = {
 
     { MP_ROM_QSTR(MP_QSTR_codec_i2c_write),
       MP_ROM_PTR(&mp_codec_i2c_write_obj) },
+
+    { MP_ROM_QSTR(MP_QSTR__codec_configure_dynamic_range_control),
+      MP_ROM_PTR(&mp_codec_configure_dynamic_range_control_obj) },
 
     { MP_ROM_QSTR(MP_QSTR_INPUT_SOURCE_NONE),
       MP_ROM_INT(st3m_audio_input_source_none) },

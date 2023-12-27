@@ -131,6 +131,12 @@ esp_err_t flow3r_bsp_audio_write(const void *src, size_t size,
 // Write audio codec register. Obviously very unsafe. Have fun.
 void flow3r_bsp_audio_register_poke(uint8_t reg, uint8_t data);
 
+// Configure audio codec DRC. For testing purposes, not stable api.
+void flow3r_bsp_max98091_configure_dynamic_range_control(
+    bool enable, uint8_t attack, uint8_t release, uint8_t make_up_gain_dB,
+    uint8_t comp_ratio, uint8_t comp_threshold_dB, uint8_t exp_ratio,
+    uint8_t exp_threshold_dB);
+
 #define FLOW3R_BSP_LED_COUNT 40
 
 // Initialize LEDs.

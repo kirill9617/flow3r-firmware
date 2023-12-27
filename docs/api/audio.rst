@@ -260,7 +260,30 @@ the "headphone" variant is chosen, else the "speaker" variant is chosen.
 .. py:function:: codec_i2c_write(reg : int, data : int)
 
    Write audio codec register. Obviously very unsafe. Do not use in applications that you
-   distribute to users. This can fry your speakers with DC>
+   distribute to users. This can fry your speakers with DC
+
+.. py:function:: _codec_configure_dynamic_range_control(enable : bool, attack : int, release : int, make_up_gain_dB : int, comp_ratio : int, comp_threshold_dB : int, exp_ratio : int, exp_threshold_dB : int)
+
+   Configures dynamic range control (compressor/expander) in the max98091 codec.
+
+   Temporary API for compressor experimentation, to be replaced later.
+
+   See page 134 of the datasheet for values:
+
+   https://www.analog.com/media/en/technical-documentation/data-sheets/MAX98091.pdf
+
+   ``exp_threshold_dB`` is expressed in dB from 35 to 66, not in raw values
+   from 0 to 31.
+
+   Example:
+
+   .. code-block:: python
+
+      audio._codec_configure_dynamic_range_control(True, 2, 3, 0, 4, 10, 0, 0)
+
+   Will result in enabling the compressor with attack 2 (1.25ms), release 3
+   (1s), no make up gain, compression ratio 4 (INF:1), compression threshold
+   10dB, and expander disabled (ratio 1:1)
 
 
 Headphone port policy
