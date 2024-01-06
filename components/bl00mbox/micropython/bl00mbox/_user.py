@@ -8,6 +8,7 @@ import math
 import uctypes
 import bl00mbox
 from bl00mbox import _helpers as helpers
+from bl00mbox._patches import _Patch as Patch
 
 
 class Bl00mboxError(Exception):

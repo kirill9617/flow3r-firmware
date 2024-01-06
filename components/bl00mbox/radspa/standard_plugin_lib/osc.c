@@ -321,7 +321,7 @@ static inline int16_t apply_waveform(osc_data_t * data, int16_t input, int32_t i
 
 #define OSCILLATE \
     int32_t incr = ((int64_t) data->pitch_coeffs[0] * (fm_mult)) >> 32; \
-    data->counter += incr << 3;
+    data->counter += incr * 8;
 
 #define SYNC_IN_APPLY { \
     data->counter = data->counter & (1<<31); \
@@ -372,7 +372,7 @@ void osc_run(radspa_t * osc, uint16_t num_samples, uint32_t render_pass_id){
     int16_t morph = radspa_signal_get_const_value(morph_sig, render_pass_id);
     int16_t waveform = radspa_signal_get_const_value(waveform_sig, render_pass_id);
     int16_t fm = radspa_signal_get_const_value(fm_sig, render_pass_id);
-    int32_t fm_mult = (((int32_t) fm) << 15) + (1L<<28);
+    int32_t fm_mult = (((int32_t)radspa_signal_get_value(fm_sig, 0, render_pass_id)) << 15) + (1L<<28);
 
     int16_t speed = radspa_signal_get_value(speed_sig, 0, render_pass_id);
 
@@ -388,7 +388,7 @@ void osc_run(radspa_t * osc, uint16_t num_samples, uint32_t render_pass_id){
 
         OSCILLATE
 
-        if(lfo) data->counter += incr * (num_samples-1);
+        if(lfo) data->counter += incr * ((num_samples - 1) << 3);
 
         if(radspa_trigger_get(sync_in, &(data->sync_in)) > 0){
             SYNC_IN_APPLY

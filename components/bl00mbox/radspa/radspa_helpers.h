@@ -50,6 +50,8 @@ inline int16_t radspa_trigger_stop(int16_t * hist){
 }
 
 inline int16_t radspa_trigger_get(int16_t trigger_signal, int16_t * hist){
+    // might wanna remove that safeguard soon
+    if(trigger_signal == RADSPA_SIGNAL_NONCONST) return 0;
     if((* hist) == trigger_signal) return 0;
     (* hist) = trigger_signal;
     if(!trigger_signal){

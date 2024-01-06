@@ -85,6 +85,24 @@ class _Plugin:
             raise bl00mbox.Bl00mboxError("plugin has been deleted")
 
     @property
+    def always_render(self):
+        self._check_existence()
+        return sys_bl00mbox.channel_bud_get_always_render(
+            self.channel_num, self.bud_num
+        )
+
+    @always_render.setter
+    def always_render(self, value):
+        self._check_existence()
+        sys_bl00mbox.channel_bud_set_always_render(
+            self.channel_num, self.bud_num, value
+        )
+
+    def delete(self):
+        self._check_existence()
+        sys_bl00mbox.channel_delete_bud(self.channel_num, self.bud_num)
+
+    @property
     def init_var(self):
         return sys_bl00mbox.channel_bud_get_init_var(self.channel_num, self.bud_num)
 
@@ -516,8 +534,8 @@ class _Distortion(_Plugin):
 class _PolySqueeze(_Plugin):
     def __init__(self, channel, plugin_id, bud_num, num_outputs=3, num_inputs=10):
         if bud_num is None:
-            outs = min(max(num_outputs, 16), 1)
-            ins = min(max(num_inputs, 32), num_outputs)
+            outs = max(min(num_outputs, 16), 1)
+            ins = max(min(num_inputs, 32), num_outputs)
             init_var = outs + (ins * 256)
             super().__init__(channel, plugin_id, init_var=init_var)
         else:

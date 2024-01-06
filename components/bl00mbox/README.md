@@ -1,11 +1,24 @@
-*current stage: pre-alpha*
+bl00mbox is a modular synthesizer engine designed for 32bit microcontrollers. At this point in time it is running exclusively on the ccc2023 badge "flow3r", but we intend to branch out to other devices soon.
 
-bl00mbox is a modular synthesizer engine designed for 32bit microcontrollers. at this point in time it is running exclusively on the ccc2023 badge "flow3r", but we intend to branch out to other devices soon.
+At this moment the only recommended API is written in micropython, there are C bindings but they are a pain, we will probably add a C++ API when we get around to it. It is not quite ready yet to run on other hardware in general though due to limitations in sample rate and buffer size.
+
+# stability
+
+This software is generally in a very early stage, API-breaking changes and deprecations are still happening regularily, but since it is already running on at least 1 user-facing device we try to keep it at a minimum. Due to this incentive to change things ideally only once a bunch of this software is not where we'd like it to be.
+
+Any API not documented in here is unstable. One noteworthy case is the `.table` member of plugins; accessing it directly used to be commonplace, now we always wrap access in helper functions. If you explore the members of objects in the REPL there are plenty non-hidden ones that are not intended for direct use, but we can't quite delete them yet due to backwards compatibility - we'll figure something out there.
 
 # table of contents
 
-
-1. [quickstart](#quickstart)
+1. [usage](#usage)
+    1. [basic concepts](#basic_concepts)
+    2. [creating channels and plugins](#creating_channels_and_plugins)
+    3. [setting a signal to a static value](#static_value)
+    4. [signal types](#signal_types)
+    5. [connecting signals](#connecting_signals)
+    6. [channel management](#channel_management)
+    7. [dead ends and circular connections](#dead_circ)
+    8. [working in the repl](#work_repl)
 2. [plugins](#plugins)
     1. [tone generators](#tone_generators)
         1. [noise](#noise)
@@ -32,10 +45,269 @@ bl00mbox is a modular synthesizer engine designed for 32bit microcontrollers. at
         4. [slew\_rate\_limiter](#slew_rate_limiter)
         5. [delay](#delay)
 3. [patches](#patches)
+4. [examples](#examples)
 
-# quickstart <a name="quickstart"></a>
+# usage <a name="usage"></a>
 
-TODO (for an outdated version see https://docs.flow3r.garden/badge/bl00mbox.html, most basic concepts still apply)
+## basic concepts <a name="basic_concepts"></a>
+
+bl00mbox uses plugins as atomic sound generators/processors. These plugins provide signals which can be used to stream audio or control data from one plugin to another. Arbitrary signals may then be routed to the global sound output.
+
+Plugins are grouped into channels so that operating systems can quickly switch between presets and/or mix different sound generators/processors together. Channels are a limited resource, so care must be taken to free them once they are no longer needed.
+
+Audio signals and control signals are in principle intercompatible, but for performance reasons the bandwidth of some signal sinks and sources is limited to a sample rate of about 750Hz (@ 64 samples/buffer).
+
+## creating channels and plugins <a name="creating_channels_and_plugins"></a>
+
+A plugin can be generated as such:
+
+```python
+import bl00mbox
+
+# request a new channel named "demo"
+blm = bl00mbox.Channel("demo")
+
+# create an instance of the "osc" plugin
+osc = blm.new(bl00mbox.plugins.osc)
+
+# connect the output signal of the plugin to the channel mixer
+osc.signals.output = blm.mixer
+# disconnect it
+osc.signals.output = None
+```
+Here we used the `=` operator to connect signals, more on that later.
+
+Some plugins require additional initialization variables, the mixer for example needs a number of input channels:
+```python
+mixer = blm.new(bl00mbox.plugins.mixer, 5)
+```
+
+## setting a signal to a static value <a name="static_value"></a>
+
+
+All signals are encoded as integer values from `-32767..32767`. You can assign a fixed value directly to any *[input]* type signal, but to read it you need to use the `.value` member:
+
+```python
+# assign a fixed value to a signal and disconnect all sources
+osc.signals.morph = -12000
+# read the current value
+print(osc.signals.morph.value)
+```
+
+If the signal is streaming data from an output signal the stream is severed.
+
+*Note: The `signals` member of a plugin is what makes this syntax happen. If signals are accessed by references in other locations, functionality will break.*
+
+```python
+# bad code, don't create references of recursive `signals` members
+a = osc.signals.wave
+# does not work since `__setattr__` of `signals` is bypassed
+a = 15
+```
+
+## signal types <a name="signal_types"></a>
+
+The mapping between signal value and how it modulates whatever property it affects is basically arbitrary, and you'll find a detailed list below in the plugins section. However, there are a few standardized types that come with special members:
+
+**pitch:** Encoding for musical pitch. A440 is at a value of 18367, a semitone is represented by an increment of 200. Several setters/getters exist:
+
+- `.tone`: Setter/getter for musical pitch as semitone distance from A440.
+- `.freq`: Setter/getter for frequency in Hertz.
+
+**gain:** Encoding for volume. A value of 4096 represents a multiplier of 1.
+
+- `.dB`: Setter/getter for volume in dB
+- `.mult`: Setter/getter for volume in expressed as a multiplier.
+
+**trigger:** This signal type processes events.
+
+Normally you'd only connect trigger signals to other signal triggers or use them directly, but for completion's sake here is the encoding: A change from 0 to any other value is a *start event* with abs(value) as a velocity parameter, a change from a nonzero value to a nonzero value of opposite sign is a *restart event*, and a change from a nonzero value to 0 is a *stop event*. This means a 0-biased square wave will continuously generate restart events.
+
+- `.start(velocity = 32767)`: Generate a (re-) start event. Velocity is optional and must be within 1..32767.
+- `.stop()`: Generate a stop event.
+
+For example, to set the pitch of one oscillator to the pitch of another plus an octave:
+
+```python
+osc1.signals.pitch.tone = osc2.signals.pitch.tone + 12
+```
+
+**switched/semi-switched:** This signal type has discrete named value markers stored in the `switch` member. Switched signals typically interpret their value as rounded to the nearest marker while semi-switched signals allow for values in-between. The markers are subclassing `int` and return their value when accessed, but a special setter allows them to be applied to the signal directly by setting them to `True`.
+
+```python
+# selecting the square wave
+osc.signals.wave.switch.SQUARE = True
+# using the integer values to interpolate between neighbors
+mixed = (osc.signals.wave.switch.TRI + osc.signals.wave.switch.SINE)/2
+osc.signals.wave = mixed
+```
+
+*Note: In case of a binary switch you might be tempted to assume that setting one marker to `False` activates the other. This is NOT the case.*
+
+**list-type signal:** Some signals come as lists. Unlike other signals we denote them by adding `[]` to their name without whitespace in this guide. They are used like any other signal with the addition of requiring an index parameter:
+
+```python
+# connect and assign values as usual
+mixer.signals.input[0] = env_adsr0.signals.output
+mixer.signals.input_gain[0].dB = -3
+mixer.signals.input[1] = env_adsr1.signals.output
+mixer.signals.input_gain[1].dB = -3
+
+# better: put envelope generators in list and iterate
+for x in range(5):
+    mixer.signals.input[x] = env_adsr[x].signals.output
+    mixer.signals.input_gain[x].dB = -3
+```
+
+As a final note: What if you need the value that a certain conversion, `.freq` for example, would generate? We wanted to bring helper functions for that into this release but we plain forgot. `bl00mbox.helpers` exists but we don't even know what's in there right now. Best of luck, cya at the next update :3!
+
+## connecting signals <a name="connecting_signals"></a>
+
+A connection can only be made between an input and an output type signal:
+
+```python
+# connecting an input to an output...
+env_adsr.signals.input = osc.signals.output
+# ...or an output to an input!
+env_adsr.signals.env_output = osc.signals.morph
+# the channel mixer is an input type signal:
+env_adsr.signals.output = blm.mixer
+# listen :D
+env_adsr.signals.trigger.start()
+```
+
+An output signal can fan out to arbitrary many inputs, but an input may only receive data from a single source, attempting to assign a different source or static value to it will result in the exiting connection being severed. A signal may also be disconnected by setting it to `None`, in which case an input signal will fall back to its last static value.
+
+An exception to the rule is the channel mixer; you can connect as many signals as you want to it, but you can only disconnect them source-side. *We're not quite sure if we're gonna keep the mixer around in its current form anyways, so we'll just keep it inconsistent for now until we've figured out what we want.*
+
+```python
+# connects normally
+env_adsr1.signals.output = blm.mixer
+# exception to the rule: both are connected and summed
+env_adsr2.signals.output = blm.mixer
+# does not work
+blm.mixer = None
+# works, but also disconnects all other sinks from the signal
+env_adsr2.signals.output = None
+# there's really no clean way to do this atm :/
+```
+
+## channel management <a name="channel_management"></a>
+
+
+Channels are a limited resource. Also they are not garbage collected and happily live on in the backend no matter the state of the frontend. These are intentional design decisions which bring some advantages but also require discipline from the user to free resources when they're done with them:
+
+```python
+# create a new channel and a plugin
+blm = bl00mbox.Channel("demo")
+osc = blm.new(bl00mbox.plugins.osc)
+
+# set channel volume (1..32767)
+blm.volume = 2000
+
+# clear all plugins from the channel
+blm.clear()
+
+# osc is now a stale reference and the following will fail:
+osc.signals.output = blm.mixer
+
+# mark the channel as free so that it can be passed to the
+# next caller of bl00mbox.Channel()
+blm.free = True
+
+# best to not use that reference anymore to not interfere
+# with other applications that now might use it
+blm = None
+```
+
+bl00mbox does some basic automatic channel management under the hood. Most importantly, there is no more than one channel which is *foregrounded*. By default, only the foreground channel is rendered, all others are waiting in memory until their foreground time has come. By default, the engine foregrounds whichever channel was *last interacted with*; this prevents people from forgetting foregrounding and waiting in silence. In the future we'll add a config option for fully manual switching too.
+
+Backgrounded channels may render as well using the `background_mute_override` option, so that a simple setup could look like this:
+
+```python
+drums = bl00mbox.Channel("drums")
+# [skipped: build some auto-drum patch, beat is now playing]
+
+lead = bl00mbox.Channel("lead")
+# "drums" is now paused since "lead" took the foreground
+
+lead.foreground = False
+# "drums" is still silent, nothing is in foreground
+
+drums.background_mute_override = True
+# "drums" starts playing in background
+
+# "drums" is in foreground again
+drums.foreground = True
+drums.background_mute_override = False
+```
+
+## dead ends and circular connections <a name="dead_circ"></a>
+
+bl00mbox does not render all plugins in an active channel at all times. A plugin is rendered exactly when another plugin uses it as a source. For example:
+
+```python
+# assume these are instances of plugins of the same name in vanilla state:
+bl00mbox_line_in.signals.mid = sampler.signals.record_input
+sampler.signals.record.trigger.start()
+# this will never record anything as nobody requests data from the sampler.
+```
+
+This behavior is intended as it can be used to efficiently shut down a whole network of plugins from a single plugin that is set to mute for example, however as shown above it sometimes can have unintended side effects. A simple solution could be:
+
+```python
+mixer.signals.input[0] = sampler.signals.playback_output
+mixer.signals.input_gain[0].mult = 0 # mute
+mixer.signals.output = blm.mixer
+```
+
+This is far from elegant and we'll come up with something better in the future :D.
+
+As a redeeming quality the rendering engine has a trick up its sleeve:
+
+```python
+osc.signals.output = range_shifter.signals.input
+range_shifter.signals.output_range[0] = -10
+range_shifter.signals.output_range[1] = 10
+osc.signals.fm = range_shifter.signals.output
+```
+
+Circular dependencies are generally allowed, but they do come with a grain of salt: If the rendering engine finds itself at the situation where during the render of a plugin data from the same plugin is being requested, it simply uses data from the last render cycle! This of course means that there is suddenly a buffer-length delay (i.e., 4/3 ms) in the feedback loop which means the feedback-fm topology above has a pitch-dependent waveform, but it's better than not having the feature at all so we just went for it :P. *Tip: use feedback loops in conjunction with filters and distortion to create sounds that are truly "out there".*
+
+## working in the repl <a name="work_repl"></a>
+
+
+bl00mbox has a few features that make repl work nice and easy, albeit there being some or the other quirk. First and foremost the `__repr__` of plugins, patches and channels shows generally useful information. Try:
+
+```python
+blm = bl00mbox.Channel("demo")
+osc = blm.new(bl00mbox.plugins.osc)
+# just hit enter to show `__repr__`
+blm
+osc
+```
+
+Ever wondered why we give those channel names? Channel management is still very underwhelming, but here's a useful trick: Since all data lives in the backend, you can run a python script that spawns a channel, then Ctrl-C out of it, summon the abandoned channel and start playing with the debris!
+
+```python
+# retrieve a channel by ID number
+blm = bl00mbox.Channel(1) # NEVER EVER DO THIS IN AN APPLICATION WE'LL haunt YOU
+# check repr if it's the channel u wanted
+blm
+# if no, get next
+blm = bl00mbox.Channel(2) # SRSLY DON'T
+blm
+# if yes: check plugins!
+[print(x) for x in blm.plugins]
+
+# note: the plugin number that is given by the plugin repr does not 
+# represent the index in the blm.plugins list! we'll upgrade this someday.
+# it's not really a production code feature yet, but rather a tiny backdoor
+# to figure out what's down with the up.
+
+# you can now mess with plugins as usual. ideally do give them names tho :P
+blm.plugins[0].signals.gain = blm.plugins[1].signals.pitch_out
+```
 
 # plugins <a name="plugins"></a>
 
@@ -176,14 +448,25 @@ a collection of second-order filters.
 - `reso [input]` *(unit: 4096\*Q, default: 1Q)*: resonance of the filter. low values (<0.7Q) result in a soft attenuation knee, medium values (<3Q) result in a boost around cutoff and a sharper transition into the attenuation zone, high values may cause self-oscillation. at negative values the filter switches into allpass mode. *note: absolute values below 684 are clamped at this point in time. we are considering using this region for first order filters in the future, so please avoid actively using this clamp if reasonably possible.*
 - `gain [input/gain]` *(default: 0dB)*: gain of both wet and dry output of the filter. loud signals in combination with high Q can lead to clipping which can be solved by reducing this value.
 - `mix [input]` *(default: 32767)*: blends between the original "dry" input signal (fully dry at 0) and the filtered "wet" signal (fully wet at 32767). for negative values the wet signal is inverted while the dry signal isn't, allowing for phase cancellation experiments.
-- `mode [input/switched]` *(default: LOWPASS)*: selects between different filter types. **LOWPASS** (-32767) barely affects frequencies far below the cutoff and progressively attenuates above the resonant peak, **HIGHPASS** (32767) does the same with higher/lower frequencies flipped. **BANDPASS** (0) only allows signals around the cutoff to pass. A bandblock can be achieved by setting `mix` to -16384. If `reso` is negative the transformation *wet = dry - 2\*wet* is applied to create an equivalent allpass. *note: at this point in time only discrete settings exist, but we intend to add a continous blend to this parameter, please avoid using in-between values for future compatibility*
+- `mode [input/semi-switched]` *(default: LOWPASS)*: selects between different filter types. **LOWPASS** (-32767) barely affects frequencies far below the cutoff and progressively attenuates above the resonant peak, **HIGHPASS** (32767) does the same with higher/lower frequencies flipped. **BANDPASS** (0) only allows signals around the cutoff to pass. A bandblock can be achieved by setting `mix` to -16384. If `reso` is negative the transformation *wet = dry - 2\*wet* is applied to create an equivalent allpass. In-between values interpolate between filter types.
 
 ---
 
 ### distortion <a name="distortion"></a>
 
+Wavetable distortion with fixed length 129 entry list. At this point there is no antialiasing but we'll add an antiderivative approximation soon.
 
-TODO
+It was quite common to use the generic `.table` property directly with this plugin, however direct access to this member is being deprecated across all plugins and we'd ask you to use `.curve` instead. In return you get a cute repr.
+
+###### signals
+
+- `output [output]`: output of linearily interpolated wavetable.
+- `input [input]` *(default: 0)*: represents fractional index of wavetable when scaled to 0..128
+
+###### members
+
+- `.curve: list[int]`: The wavetable of the distortion. Always returns the full 129 entry list, but has a special setter that takes lists of arbitrary length and interpolates to generate a reasonably equivalent 129 entry list.
+- `.curve_set_power(power: float = 2, volume: int = 32767, gate: int = 0)`: fills the wavetable with two power functions smoothly stitched together at the origin. `power > 1` yields compressing distortion, `0 < power < 1` yields expanding distortion. `volume` sets the maximum value. `gate > 0` results in the wavetable filled with zeros so that input values roughly up to the `gate` value result are suppressed (the math is a bit janky in the current release, rushed that one a little bit, will be more precise soon).
 
 ---
 
@@ -260,8 +543,7 @@ generates pitch-shifted and -limited copies of a pitch input. all outputs are co
 
 ### sequencer <a name="sequencer"></a>
 
-
-(no changes from old version pending. will be replaced sometime in the future tho.)
+TODO (no changes from old version tho)
 
 ---
 
@@ -306,14 +588,37 @@ deprecation reason: early hack for very low cpu load filtering, used only a few 
 
 ### delay <a name="delay"></a>
 
-
 still exists as `delay_static` for now but has issues as described there.
 
 # patches <a name="patches"></a>
-
 
 confession time: when this was very young software but a release was necessary we did not have the infrastructure to attach arbitrary functions to individual plugins, so we misappropriated patches for this. the situation has been fixed, but many existing patches are deprecated now for this reason, specifically `fuzz`, `sampler` and `sequencer`.
 
 furthermore we made the mistake of not specifying stable/unstable surfaces so that we find ourselves in the sad situation where we would be able to improve patches but find ourselves unable to do so since users may have hooked up signals to the internal structure.
 
 with this in mind, you could say that from a general point of view **all existing patches are deprecated**. the only exceptions at this point are `tinysynth` and `tinysynth_fm`, but their internal structure will be modified in the next major update - if your application accesses anything in the `.plugins` attribute, please create a local copy of the patch in your application, else it's destined to break.
+
+# examples <a name="examples"></a>
+
+Feedbacked filter (needs kickstart for self-oscillation):
+
+```python
+import bl00mbox
+blm = bl00mbox.Channel()
+f = blm.new(bl00mbox.plugins.filter)
+m = blm.new(bl00mbox.plugins.mixer, 2)
+f.signals.output = m.signals.input[0]
+f.signals.output = blm.mixer
+f.signals.input = m.signals.output
+
+f.signals.gain.dB = 18
+f.signals.mode.switch.BANDPASS = True
+f.signals.cutoff.tone = -1
+f.signals.reso = -12000
+f.signals.mix = -18000
+m.signals.input_gain[0].dB = 18
+m.signals.gain.dB = 18
+
+# kickstart
+m.signals.input[1] = 32767
+```
