@@ -13,18 +13,18 @@ Please consider carefully if you wish to go above the user setting.
 
     import leds
     import math
-    from st3m.ui import colour
+    from st3m.ui import colours
 
     def on_enter(self, vm):
         # mellow slew rate but never greater than user value
         leds.set_slew_rate(min(leds.get_slew_rate(), 180))
-        leds.set_all_rgba(*colour.hsv_to_rgb(math.tau/3, 1, 1), 0.5)
+        leds.set_all_rgba(*colours.hsv_to_rgb(math.tau/3, 1, 1), 0.5)
         leds.update()
 
     def on_enter(self, vm):
         # for response time critical applications like LED Painter: set practical minimum
         leds.set_slew_rate(max(leds.get_slew_rate(), 200))
-        leds.set_all_rgba(*colour.hsv_to_rgb(math.tau/3, 1, 1), 0.5)
+        leds.set_all_rgba(*colours.hsv_to_rgb(math.tau/3, 1, 1), 0.5)
         leds.update()
 
 
