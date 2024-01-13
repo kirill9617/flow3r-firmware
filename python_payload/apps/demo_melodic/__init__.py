@@ -17,6 +17,7 @@ class Page:
         self.toggle = None
         self.subwindow = 0
         self.finalized = False
+        self.full_redraw = True
 
     def finalize(self, channel, lfo_signal, env_signals):
         for param in self.params:
@@ -27,7 +28,18 @@ class Page:
 class ToggleParameter:
     def __init__(self, name):
         self.name = name
-        self.value = False
+        self.full_redraw = True
+        self._value = False
+
+    @property
+    def value(self):
+        return self._value
+
+    @value.setter
+    def value(self, val):
+        if self._value != val:
+            self._value = val
+            self.full_redraw = True
 
 
 class FullRangeParameter:
@@ -62,6 +74,14 @@ class FullRangeParameter:
         self.default_env_mod = 0.5
         self.default_lfo_mod = 0.5
 
+        # seperate track keeping to avoid blm rounding errors
+        self._norm_prev = -1
+        self._lfo_norm_prev = -1
+        self._env_norm_prev = -1
+        self.norm_changed = True
+        self.lfo_norm_changed = True
+        self.env_norm_changed = True
+
         self._output_min = signal_range[0]
         self._output_spread = signal_range[1] - signal_range[0]
         self.set_unit_signal(signals[0], signal_range)
@@ -90,6 +110,9 @@ class FullRangeParameter:
     @norm.setter
     def norm(self, val):
         val = self._norm_to_signal(val)
+        if val != self._norm_prev:
+            self.norm_changed = True
+            self._norm_prev = val
         for signal in self._signals:
             self.signal_set_value(signal, val)
 
@@ -105,6 +128,10 @@ class FullRangeParameter:
             val = signal.value
             mod_mixer = channel.new(bl00mbox.plugins.mixer, 3)
             mod_shifter = None
+            # ughhhhh
+            dummy_mixer = channel.new(bl00mbox.plugins.mixer, 1)
+            dummy_mixer.signals.gain = 0
+            dummy_mixer.signals.output = channel.mixer
             if range_shift:
                 val = (val - self._output_min) / self._output_spread
                 val = (val * 64434) - 32767
@@ -117,8 +144,10 @@ class FullRangeParameter:
                 mod_shifter.signals.output = signal
                 self._output_min = -32767
                 self._output_spread = 65534
+                dummy_mixer.signals.input[0] = mod_shifter.signals.output
             else:
                 mod_mixer.signals.output = signal
+                dummy_mixer.signals.input[0] = mod_mixer.signals.output
             mod_mixer.signals.gain.mult = 2
             mod_mixer.signals.input[0] = val
             self._signals[i] = mod_mixer.signals.input[0]
@@ -150,6 +179,9 @@ class FullRangeParameter:
 
     @lfo_norm.setter
     def lfo_norm(self, val):
+        if val != self._lfo_norm_prev:
+            self.lfo_norm_changed = True
+            self._lfo_norm_prev = val
         if self.modulated:
             for m in self._mod_mixers:
                 m.signals.input_gain[1].value = val * 65534 - 32767
@@ -163,6 +195,9 @@ class FullRangeParameter:
 
     @env_norm.setter
     def env_norm(self, val):
+        if val != self._env_norm_prev:
+            self.env_norm_changed = True
+            self._env_norm_prev = val
         if self.modulated:
             for m in self._mod_mixers:
                 m.signals.input_gain[2].value = val * 65534 - 32767
@@ -571,6 +606,7 @@ class MelodicApp(Application):
         self.lfo_value = 0
 
         self.init_print_pending = True
+        self.enter_done = False
 
     def get_col(self, index):
         index = index % 3
@@ -607,9 +643,10 @@ class MelodicApp(Application):
     def draw(self, ctx):
         if self.blm is None:
             return
+        if not self.enter_done:
+            self.pages[self.active_page].full_redraw = True
         self.env_value = self._signal_env.value / 4096
         self.lfo_value = self._signal_lfo.value / 4096 + 0.5
-        ctx.rgb(0, 0, 0).rectangle(-120, -120, 240, 240).fill()
         if self.mode_main:
             self.draw_main(ctx)
         else:
@@ -653,7 +690,7 @@ class MelodicApp(Application):
         ctx.restore()
 
     def draw_bar_graph(
-        self, ctx, petal, norms, label, unit=None, sub=0, plusminus=False
+        self, ctx, petal, norms, label, unit=None, sub=0, plusminus=False, skip_redraw=0
     ):
         if petal not in [1, 3, 7, 9]:
             return
@@ -662,6 +699,8 @@ class MelodicApp(Application):
         norms = [max(0, min(1, norm)) for norm in norms]
         if unit is None:
             unit = str(norms[0]) + "%"
+        if len(norms) == 1 and skip_redraw > 1:
+            return
 
         labelsize = 18
         unitsize = 16
@@ -701,23 +740,43 @@ class MelodicApp(Application):
         ctx.rotate(math.tau * trans_rot * sign)
         ctx.translate(-translate_center * sign, 0)
 
-        ctx.move_to(labelstart * sign, -15)
-        ctx.text_align = labelalign
-        ctx.font_size = labelsize
+        if skip_redraw == 0:
+            ctx.move_to(labelstart * sign, -15)
+            ctx.text_align = labelalign
+            ctx.font_size = labelsize
+            ctx.rgb(*self.CYA)
+            ctx.text(label)
 
-        ctx.rgb(*self.CYA)
-        ctx.text(label)
-
-        ctx.rgb(*self.YEL)
         ctx.move_to(unitend * sign, 10 + unitsize)
-        ctx.text_align = unitalign
-        ctx.font_size = unitsize
-        ctx.text(unit)
+        if len(norms) == 1:
+            if skip_redraw:
+                ctx.rgb(*self.BLA)
+                ctx.rectangle((unitend - 1) * sign, 13, 80 * sign, 17).fill()
+            ctx.rgb(*self.YEL)
+            ctx.text_align = unitalign
+            ctx.font_size = unitsize
+            ctx.text(unit)
+        elif len(norms) == 2:
+            if skip_redraw:
+                ctx.rgb(*self.BLA)
+                ctx.rectangle((unitend - 1) * sign, 13, 80 * sign, 17).fill()
+            ctx.rgb(*self.YEL)
+            ctx.text_align = unitalign
+            ctx.font_size = unitsize
+            ctx.text(unit)
 
-        ctx.rgb(*self.get_col(sub))
+        if skip_redraw == 0:
+            ctx.rgb(*self.get_col(sub))
+            ctx.rectangle(barstart * sign, -10, barlen * sign, 20).stroke()
+        elif skip_redraw == 1:
+            ctx.rgb(*self.BLA)
+            ctx.rectangle((barstart + 4) * sign, -6, (barlen - 8) * sign, 12).fill()
+        elif skip_redraw == 2:
+            ctx.rgb(*self.BLA)
+            ctx.rectangle((barstart + 4) * sign, 2, (barlen - 8) * sign, 4).fill()
 
-        ctx.rectangle(barstart * sign, -10, barlen * sign, 20).stroke()
         ctx.rgb(*self.PUR)
+
         if len(norms) == 1:
             if plusminus:
                 ctx.rectangle(
@@ -731,17 +790,18 @@ class MelodicApp(Application):
                     (barstart + 5) * sign, -5, (barlen - 10) * sign * norms[0], 10
                 ).fill()
         if len(norms) == 2:
-            if plusminus:
-                ctx.rectangle(
-                    (barstart + barlen / 2) * sign,
-                    -5,
-                    (barlen - 10) * sign * (norms[0] - 0.5),
-                    10,
-                ).fill()
-            else:
-                ctx.rectangle(
-                    (barstart + 5) * sign, -5, (barlen - 10) * sign * norms[0], 7
-                ).fill()
+            if skip_redraw != 2:
+                if plusminus:
+                    ctx.rectangle(
+                        (barstart + barlen / 2) * sign,
+                        -5,
+                        (barlen - 10) * sign * (norms[0] - 0.5),
+                        10,
+                    ).fill()
+                else:
+                    ctx.rectangle(
+                        (barstart + 5) * sign, -5, (barlen - 10) * sign * norms[0], 7
+                    ).fill()
             ctx.rgb(*self.YEL)
             ctx.rectangle(
                 (barstart + 5) * sign, 3, (barlen - 10) * sign * norms[1], 2
@@ -750,7 +810,9 @@ class MelodicApp(Application):
         ctx.restore()
 
     def draw_page(self, ctx, page):
-        self.draw_title(ctx, page.name)
+        if page.full_redraw:
+            ctx.rgb(0, 0, 0).rectangle(-120, -120, 240, 240).fill()
+            self.draw_title(ctx, page.name)
         modulated = False
         for i, param in enumerate(page.params):
             if i >= 4:
@@ -758,13 +820,25 @@ class MelodicApp(Application):
             if param.modulated:
                 modulated = True
                 plusminus = True
+                redraw = 2
                 if page.subwindow == 0:
                     val = param.norm
                     plusminus = False
+                    if param.norm_changed:
+                        param.norm_changed = False
+                        redraw = 1
                 elif page.subwindow == 1:
                     val = param.env_norm
+                    if param.env_norm_changed:
+                        param.env_norm_changed = False
+                        redraw = 1
                 elif page.subwindow == 2:
                     val = param.lfo_norm
+                    if param.lfo_norm_changed:
+                        param.lfo_norm_changed = False
+                        redraw = 1
+                if page.full_redraw:
+                    redraw = 0
                 self.draw_bar_graph(
                     ctx,
                     self.petal_index[i],
@@ -773,24 +847,41 @@ class MelodicApp(Application):
                     param.unit,
                     sub=page.subwindow,
                     plusminus=plusminus,
+                    skip_redraw=redraw,
                 )
             else:
-                self.draw_bar_graph(
-                    ctx, self.petal_index[i], param.norm, param.name, param.unit
-                )
+                if page.full_redraw:
+                    redraw = 0
+                elif param.norm_changed:
+                    redraw = 1
+                else:
+                    redraw = 2
+                if redraw != 2:
+                    param.norm_changed = False
+                    self.draw_bar_graph(
+                        ctx,
+                        self.petal_index[i],
+                        param.norm,
+                        param.name,
+                        param.unit,
+                        skip_redraw=redraw,
+                    )
         if page.scope_param is not None:
             self.draw_scope(ctx, page.scope_param)
         if modulated:
             self.draw_modulator_indicator(ctx)
         elif page.toggle is not None:
-            if page.toggle.value:
-                self.draw_modulator_indicator(
-                    ctx, page.toggle.name + ": on", col=self.CYA
-                )
-            else:
-                self.draw_modulator_indicator(
-                    ctx, page.toggle.name + ": off", col=self.PUR
-                )
+            if page.toggle.full_redraw:
+                if page.toggle.value:
+                    self.draw_modulator_indicator(
+                        ctx, page.toggle.name + ": on", col=self.CYA
+                    )
+                else:
+                    self.draw_modulator_indicator(
+                        ctx, page.toggle.name + ": off", col=self.PUR
+                    )
+            page.toggle.full_redraw = False
+        page.full_redraw = False
 
     def draw_scope(self, ctx, param):
         ctx.save()
@@ -804,6 +895,7 @@ class MelodicApp(Application):
         ctx.restore()
 
     def draw_main(self, ctx):
+        ctx.rgb(0, 0, 0).rectangle(-120, -120, 240, 240).fill()
         ctx.text_align = ctx.CENTER
 
         pos_of_petal = [x * 0.87 + 85 for x in self.scale]
@@ -871,6 +963,7 @@ class MelodicApp(Application):
 
         if self.blm is None:
             self.blm = bl00mbox.Channel("mono synth")
+        self.blm.volume = 13000
 
         self.mixer = self.blm.new(bl00mbox.plugins.mixer, self.polyphony)
         self.filter = self.blm.new(bl00mbox.plugins.filter)
@@ -951,7 +1044,7 @@ class MelodicApp(Application):
                     leds.set_rgb((i + k) % 40, 0, 0, 0)
         leds.update()
 
-    def on_enter(self, vm: Optional[ViewManager]) -> None:
+    def on_enter(self, vm):
         self.pages = []
         super().on_enter(vm)
         if self.blm is None:
@@ -959,6 +1052,10 @@ class MelodicApp(Application):
         self.blm.foreground = True
         self.make_scale()
         self.update_leds(init=True)
+        self.enter_done = False
+
+    def on_enter_done(self):
+        self.enter_done = True
 
     def on_exit(self):
         if self.blm is not None:
@@ -1027,11 +1124,13 @@ class MelodicApp(Application):
                 self.shift_playing_field_by_num_petals(4)
             else:
                 self.active_page = (self.active_page + 1) % len(self.pages)
+                self.pages[self.active_page].full_redraw = True
         elif self.input.buttons.app.left.pressed:
             if self.mode_main:
                 self.shift_playing_field_by_num_petals(-4)
             else:
                 self.active_page = (self.active_page - 1) % len(self.pages)
+                self.pages[self.active_page].full_redraw = True
 
         # TODO: fix this
         petals = []
@@ -1059,7 +1158,6 @@ class MelodicApp(Application):
             ):
                 self.poly_squeeze.signals.trigger_in[i].stop()
 
-        # TODO: what's this even doing, bleh
         self.update_leds()
 
         if self.mode_main:
@@ -1087,6 +1185,7 @@ class MelodicApp(Application):
         if tmp != self.petal_val[5]:
             if self.petal_val[5] == False:
                 self.pages[self.active_page].subwindow += 1
+                self.pages[self.active_page].full_redraw = True
             self.petal_val[5] = tmp
 
         self.think_page(self.pages[self.active_page])
