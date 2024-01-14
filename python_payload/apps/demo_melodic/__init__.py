@@ -608,6 +608,10 @@ class MelodicApp(Application):
         self.init_print_pending = True
         self.enter_done = False
 
+        self._scale_setup_highlight = 0
+        self._scale_setup_root = 0
+        self._scale_setup_root_mode = False
+
     def get_col(self, index):
         index = index % 3
         if index == 0:
@@ -649,8 +653,12 @@ class MelodicApp(Application):
         self.lfo_value = self._signal_lfo.value / 4096 + 0.5
         if self.mode_main:
             self.draw_main(ctx)
-        else:
-            self.draw_page(ctx, self.pages[self.active_page])
+            return
+        overhang = self.active_page - len(self.pages)
+        if overhang >= 0:
+            self.draw_setup(ctx)
+            return
+        self.draw_page(ctx, self.pages[self.active_page])
 
     def draw_title(self, ctx, name):
         ctx.save()
@@ -665,7 +673,9 @@ class MelodicApp(Application):
         ctx.restore()
 
     def draw_modulator_indicator(self, ctx, text=None, subtext=None, col=None):
-        sub = self.pages[self.active_page].subwindow
+        sub = 0
+        if self.active_page < len(self.pages):
+            sub = self.pages[self.active_page].subwindow
         ctx.save()
         ctx.rgb(*self.PUR)
         ctx.arc(0, 150, 100, 0, math.tau, 1).fill()
@@ -893,6 +903,86 @@ class MelodicApp(Application):
         ctx.rgb(1, 0, 1)
         ctx.arc(0, 0, 25, 0, math.tau, 1).stroke()
         ctx.restore()
+
+    def draw_setup(self, ctx):
+        ctx.rgb(0, 0, 0).rectangle(-120, -120, 240, 240).fill()
+        # self.draw_modulator_indicator(ctx, "back", col=self.PUR)
+        ctx.save()
+        self.draw_scale_setup(ctx)
+        ctx.restore()
+
+    def draw_scale_setup(self, ctx):
+        self.draw_title(ctx, "scale")
+        ctx.rgb(*self.YEL)
+        if self._scale_setup_root_mode:
+            # note
+            ctx.arc(68, -84, 2, 0, math.tau, 0)
+            ctx.move_to(68 + 2, -84)
+            ctx.rel_line_to(0, -7)
+            ctx.rel_line_to(3, 2)
+            ctx.stroke()
+        else:
+            # bars
+            ctx.rectangle(68 - 2, -85, 3, 3).stroke()
+            ctx.rectangle(68 + 2, -85, 3, -6).stroke()
+        # root
+        ctx.move_to(-68 + 3, -91)
+        ctx.rel_line_to(-6, 0)
+        ctx.rel_line_to(-3, 9)
+        ctx.rel_line_to(-2, -6)
+        ctx.stroke()
+        # arrows
+        for sign in [-1, 1]:
+            ctx.move_to(100 * sign, 50)
+
+            ctx.rel_line_to(-6 * sign, -4)
+            ctx.rel_line_to(0, 8)
+            ctx.rel_line_to(6 * sign, -4)
+            ctx.stroke()
+
+        ctx.text_align = ctx.LEFT
+        radius = 500
+        ctx.translate(0, radius - 25)
+        ctx.rotate(0.25 * math.tau)
+        step = 0.033
+        oversize = 1.2
+        if self._scale_setup_root_mode:
+            oversize = 1
+        ctx.rotate((-4.5 - oversize) * step)
+        ctx.font_size = 16
+        ctx.font = "Arimo Bold"
+        for tone in range(12):
+            tone = (tone + self._scale_setup_root) % 12
+            note = bl00mbox.helpers.sct_to_note_name(tone * 200 + 18367)
+            active = tone in self.base_scale
+            size = 1
+            if tone == self._scale_setup_highlight and not self._scale_setup_root_mode:
+                size = oversize
+            if size > 1:
+                size = 1.5
+                ctx.rotate((oversize - 1) * step)
+                ctx.rgb(*self.CYA)
+                if active:
+                    ctx.rectangle(-radius - 5, -5 * size, -20 * size, 10 * size).fill()
+                ctx.rectangle(-radius - 5, -5 * size, -20 * size, 10 * size).stroke()
+                ctx.rgb(*self.PUR)
+                if not active:
+                    ctx.rectangle(-radius, -5 * size, 10 * size, 10 * size).fill()
+                ctx.rectangle(-radius, -5 * size, 10 * size, 10 * size).stroke()
+            else:
+                if active:
+                    ctx.rgb(*self.CYA)
+                    ctx.rectangle(-radius - 5, -5, -20, 10).fill()
+                else:
+                    ctx.rgb(*self.PUR)
+                    ctx.rectangle(-radius, -5, 10, 10).fill()
+
+            ctx.rgb(*self.PUR)
+            ctx.move_to(22 - radius, 5)
+            ctx.text(note[:-1])
+            ctx.rotate(step)
+            if size > 1:
+                ctx.rotate((oversize - 1) * step)
 
     def draw_main(self, ctx):
         ctx.rgb(0, 0, 0).rectangle(-120, -120, 240, 240).fill()
@@ -1123,18 +1213,25 @@ class MelodicApp(Application):
             if self.mode_main:
                 self.shift_playing_field_by_num_petals(4)
             else:
-                self.active_page = (self.active_page + 1) % len(self.pages)
-                self.pages[self.active_page].full_redraw = True
+                self.active_page = (self.active_page + 1) % (len(self.pages) + 1)
+                if self.active_page < len(self.pages):
+                    self.pages[self.active_page].full_redraw = True
         elif self.input.buttons.app.left.pressed:
             if self.mode_main:
                 self.shift_playing_field_by_num_petals(-4)
             else:
-                self.active_page = (self.active_page - 1) % len(self.pages)
-                self.pages[self.active_page].full_redraw = True
+                self.active_page = (self.active_page - 1) % (len(self.pages) + 1)
+                if self.active_page < len(self.pages):
+                    self.pages[self.active_page].full_redraw = True
+
+        if self.mode_main:
+            playable_petals = range(10)
+        else:
+            playable_petals = range(0, 10, 2)
 
         # TODO: fix this
         petals = []
-        for i in range(0, 10, 1 if self.mode_main else 2):
+        for i in playable_petals:
             if ins.captouch.petals[i].pressed:
                 petals += [i]
         if (len(petals) == 1) and (not self.mid_point_lock):
@@ -1148,7 +1245,7 @@ class MelodicApp(Application):
             if delta < -3:
                 self.shift_playing_field_by_num_petals(delta + 3)
 
-        for i in range(0, 10, 1 if self.mode_main else 2):
+        for i in playable_petals:
             if self.input.captouch.petals[i].whole.pressed:
                 self.poly_squeeze.signals.pitch_in[i].tone = self.scale[i]
                 self.poly_squeeze.signals.trigger_in[i].start()
@@ -1161,6 +1258,10 @@ class MelodicApp(Application):
         self.update_leds()
 
         if self.mode_main:
+            return
+        overhang = self.active_page - len(self.pages)
+        if overhang >= 0:
+            self.think_setup(ins)
             return
 
         for petal in [7, 9, 1, 3]:
@@ -1224,6 +1325,45 @@ class MelodicApp(Application):
             page.subwindow %= 3
         else:
             page.subwindow %= 1
+
+    def think_setup(self, ins):
+        self.think_scale_setup(ins)
+
+    def think_scale_setup(self, ins):
+        root_shift = 0
+        if self.input.captouch.petals[7].whole.pressed:
+            self._scale_setup_highlight = (self._scale_setup_highlight - 1) % 12
+            if self._scale_setup_root_mode:
+                self._scale_setup_root = (self._scale_setup_root - 1) % 12
+                root_shift = -1
+        if self.input.captouch.petals[3].whole.pressed:
+            self._scale_setup_highlight = (self._scale_setup_highlight + 1) % 12
+            if self._scale_setup_root_mode:
+                self._scale_setup_root = (self._scale_setup_root + 1) % 12
+                root_shift = 1
+
+        if self.input.captouch.petals[9].whole.pressed:
+            self._scale_setup_root_mode = True
+
+        if root_shift != 0:
+            new_scale = [(x + root_shift) % 12 for x in self.base_scale]
+            new_scale.sort()
+            self.base_scale = new_scale
+            self.make_scale()
+
+        if self.input.captouch.petals[1].whole.pressed:
+            if self._scale_setup_root_mode:
+                self._scale_setup_root_mode = False
+            else:
+                index = self._scale_setup_highlight
+                new_scale = list(self.base_scale)
+                if index in new_scale:
+                    new_scale.remove(index)
+                else:
+                    new_scale += [index]
+                new_scale.sort()
+                self.base_scale = new_scale
+                self.make_scale()
 
 
 # For running with `mpremote run`:
