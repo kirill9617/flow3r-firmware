@@ -1,17 +1,14 @@
-from st3m.goose import List, Optional
-from st3m.input import InputState, InputController
-from st3m.ui.view import ViewManager
-from st3m.application import Application, ApplicationContext
-from ctx import Context
+from st3m.application import Application
+from st3m.ui import colours
 import bl00mbox
 import leds
-import math
-from st3m.ui import colours
+import math, os, json, errno
 
 
 class Page:
     def __init__(self, name):
         self.name = name
+        self.display_name = name
         self.params = []
         self.scope_param = None
         self.toggle = None
@@ -23,6 +20,25 @@ class Page:
         for param in self.params:
             param.finalize(channel, lfo_signal, env_signals)
         self.finalized = True
+
+    def get_settings(self):
+        settings = {}
+        params = list(self.params)
+        if self.toggle is not None:
+            params += [self.toggle]
+        for param in params:
+            settings[param.name] = param.get_settings()
+        return settings
+
+    def set_settings(self, settings):
+        params = list(self.params)
+        if self.toggle is not None:
+            params += [self.toggle]
+        for param in params:
+            if param.name in settings.keys():
+                param.set_settings(settings[param.name])
+            else:
+                print(f"no setting found for {self.name}->{param.name}")
 
 
 class ToggleParameter:
@@ -41,14 +57,20 @@ class ToggleParameter:
             self._value = val
             self.full_redraw = True
 
+    def get_settings(self):
+        return {"val": self.value}
+
+    def set_settings(self, settings):
+        self.value = settings["val"]
+
 
 class FullRangeParameter:
     def __init__(
         self,
         signals,
         name,
+        default_norm,
         signal_range=[-32767, 32767],
-        default_norm=None,
         modulated=False,
     ):
         def get_val(signal):
@@ -73,11 +95,12 @@ class FullRangeParameter:
         self.finalized = False
         self.default_env_mod = 0.5
         self.default_lfo_mod = 0.5
+        self.default_norm = default_norm
 
         # seperate track keeping to avoid blm rounding errors
-        self._norm_prev = -1
-        self._lfo_norm_prev = -1
-        self._env_norm_prev = -1
+        self._thou = -1
+        self._lfo_thou = -1
+        self._env_thou = -1
         self.norm_changed = True
         self.lfo_norm_changed = True
         self.env_norm_changed = True
@@ -85,8 +108,6 @@ class FullRangeParameter:
         self._output_min = signal_range[0]
         self._output_spread = signal_range[1] - signal_range[0]
         self.set_unit_signal(signals[0], signal_range)
-        if default_norm is not None:
-            self.norm = default_norm
 
     def set_unit_signal(self, signal, signal_range=[-32767, 32767]):
         self._signal_string_signal = signal
@@ -105,14 +126,18 @@ class FullRangeParameter:
 
     @property
     def norm(self):
-        return self._norm_from_signal(self._signals[0])
+        if self.default_norm is not None:
+            return self._thou / 1000
+        else:
+            return self._norm_from_signal(self._signals[0])
 
     @norm.setter
     def norm(self, val):
-        val = self._norm_to_signal(val)
-        if val != self._norm_prev:
+        intval = int(val * 1000)
+        if intval != self._thou:
             self.norm_changed = True
-            self._norm_prev = val
+            self._thou = intval
+        val = self._norm_to_signal(val)
         for signal in self._signals:
             self.signal_set_value(signal, val)
 
@@ -161,6 +186,9 @@ class FullRangeParameter:
             self.env_norm = self.default_env_mod
 
     def finalize(self, channel, lfo_signal, env_signals):
+        if self.finalized:
+            return
+        self.norm = self.default_norm
         if self.modulated:
             self._create_modulator(channel, lfo_signal, env_signals)
         self.finalized = True
@@ -172,35 +200,55 @@ class FullRangeParameter:
 
     @property
     def lfo_norm(self):
-        if not self.modulated:
-            return 0
-        else:
-            return (self._mod_mixers[0].signals.input_gain[1].value + 32767) / 65534
+        return self._lfo_thou / 1000
 
     @lfo_norm.setter
     def lfo_norm(self, val):
-        if val != self._lfo_norm_prev:
-            self.lfo_norm_changed = True
-            self._lfo_norm_prev = val
         if self.modulated:
+            intval = int(val * 1000)
+            if intval != self._lfo_thou:
+                self.lfo_norm_changed = True
+                self._lfo_thou = intval
             for m in self._mod_mixers:
                 m.signals.input_gain[1].value = val * 65534 - 32767
 
     @property
     def env_norm(self):
-        if not self.modulated:
-            return 0
-        else:
-            return (self._mod_mixers[0].signals.input_gain[2].value + 32767) / 65534
+        return self._env_thou / 1000
 
     @env_norm.setter
     def env_norm(self, val):
-        if val != self._env_norm_prev:
-            self.env_norm_changed = True
-            self._env_norm_prev = val
         if self.modulated:
+            intval = int(val * 1000)
+            if intval != self._env_thou:
+                self.env_norm_changed = True
+                self._env_thou = intval
             for m in self._mod_mixers:
                 m.signals.input_gain[2].value = val * 65534 - 32767
+
+    def get_settings(self):
+        if not self.finalized:
+            return
+        settings = {}
+        settings["val"] = self._thou
+        if self.modulated:
+            settings["lfo"] = self._lfo_thou
+            settings["env"] = self._env_thou
+        return settings
+
+    def set_settings(self, settings):
+        if not self.finalized:
+            return
+        self.norm = settings["val"] / 1000
+        if self.modulated:
+            if "lfo" in settings.keys():
+                self.lfo_norm = settings["lfo"] / 1000
+            else:
+                self.lfo_norm = 0.5
+            if "env" in settings.keys():
+                self.env_norm = settings["env"] / 1000
+            else:
+                self.env_norm = 0.5
 
 
 class hard_sync_osc(bl00mbox._patches._Patch):
@@ -233,23 +281,23 @@ class hard_sync_osc(bl00mbox._patches._Patch):
         param = FullRangeParameter(
             [self.plugins.mp.signals.shift[1]],
             "focus",
+            0.2,
             [18367, 18367 + 2400 * 2],
-            default_norm=0.2,
             modulated=True,
         )
         page.params += [param]
         param = FullRangeParameter(
             [self.plugins.mp.signals.shift[0]],
             "disrupt",
+            0,
             [18367, 18367 + 2400 * 2],
-            default_norm=0,
             modulated=True,
         )
         page.params += [param]
         param = FullRangeParameter(
             [self.plugins.main_osc.signals.waveform],
             "wave",
-            default_norm=0.33,
+            0.33,
             modulated=True,
         )
         page.params += [param]
@@ -308,7 +356,7 @@ class detune_osc(bl00mbox._patches._Patch):
         param = FullRangeParameter(
             [self.plugins.ranges[1].signals.input],
             "detune",
-            default_norm=0.15,
+            0.15,
             modulated=True,
         )
         param.default_env_mod = 1
@@ -316,15 +364,15 @@ class detune_osc(bl00mbox._patches._Patch):
         param = FullRangeParameter(
             [self.plugins.ranges[0].signals.input],
             "wave",
-            default_norm=0.98,
+            0.98,
             modulated=True,
         )
         page.params += [param]
         param = FullRangeParameter(
             [self.plugins.mixer.signals.gain],
             "dist",
+            0.34,
             [367, 32767],
-            default_norm=0.34,
             modulated=True,
         )
         param.default_env_mod = 1
@@ -333,8 +381,8 @@ class detune_osc(bl00mbox._patches._Patch):
         param = FullRangeParameter(
             [self.plugins.mixer.signals.input_gain[3]],
             "noise",
+            0,
             [0, 9001],
-            default_norm=0,
             modulated=True,
         )
         page.params += [param]
@@ -386,30 +434,28 @@ class rand_lfo(bl00mbox._patches._Patch):
 
     def make_page(self):
         page = Page("lfo")
-        param = FullRangeParameter(
-            [self.plugins.osc.signals.waveform], "wave", default_norm=0.33
-        )
+        param = FullRangeParameter([self.plugins.osc.signals.waveform], "wave", 0.33)
         page.params += [param]
-        param = FullRangeParameter(
-            [self.plugins.osc.signals.morph], "morph", default_norm=0.50
-        )
+        param = FullRangeParameter([self.plugins.osc.signals.morph], "morph", 0.50)
         page.params += [param]
         param = FullRangeParameter(
             [self.plugins.noise_vol.signals.input_gain[0]],
             "rng",
+            0.41,
             [0, 768],
-            default_norm=0.41,
         )
         page.params += [param]
         param = FullRangeParameter(
             [self.plugins.noise_shift.signals.input],
             "speed",
+            0.65,
             [-10000, 6000],
-            default_norm=0.65,
         )
         param.signal_get_string = rand_lfo.get_speed_string
         page.params += [param]
-        page.scope_param = FullRangeParameter([self.signals.output], "", [-2048, 2048])
+        page.scope_param = FullRangeParameter(
+            [self.signals.output], "", None, [-2048, 2048]
+        )
         return page
 
 
@@ -421,9 +467,6 @@ class mix_env_filt(bl00mbox._patches._Patch):
         self.plugins.mp = self._channel.new(bl00mbox.plugins.multipitch, 4)
 
         self.plugins.mixer = self._channel.new(bl00mbox.plugins.mixer, mixer_inputs)
-
-        for i in range(mixer_inputs):
-            self.plugins.mixer.signals.input_gain[i].dB = -6
 
         self.plugins.env = self._channel.new(bl00mbox.plugins.env_adsr)
         self.plugins.env.signals.input = self.plugins.mixer.signals.output
@@ -478,6 +521,7 @@ class mix_env_filt(bl00mbox._patches._Patch):
             param = FullRangeParameter(
                 [self.plugins.mixer.signals.input_gain[i]],
                 "chan " + str(i + 1),
+                0.818,
                 [-33, 0],
             )
             param.signal_get_value = self.get_dB_value
@@ -495,26 +539,26 @@ class mix_env_filt(bl00mbox._patches._Patch):
         if toggle is not None:
             page.toggle = toggle
         param = FullRangeParameter(
-            [self.plugins.env.signals.attack], "attack", [0, 1000], default_norm=0.091
+            [self.plugins.env.signals.attack], "attack", 0.091, [0, 1000]
         )
         param.signal_get_string = self.get_ms_string
         page.params += [param]
         param = FullRangeParameter(
-            [self.plugins.env.signals.decay], "decay", [0, 1000], default_norm=0.247
+            [self.plugins.env.signals.decay], "decay", 0.247, [0, 1000]
         )
         param.signal_get_string = self.get_ms_string
         page.params += [param]
         param = FullRangeParameter(
-            [self.plugins.env.signals.sustain], "sustain", [0, 32767], default_norm=0.2
+            [self.plugins.env.signals.sustain], "sustain", 0.2, [0, 32767]
         )
         page.params += [param]
         param = FullRangeParameter(
-            [self.plugins.env.signals.release], "release", [0, 1000], default_norm=0.236
+            [self.plugins.env.signals.release], "release", 0.236, [0, 1000]
         )
         param.signal_get_string = self.get_ms_string
         page.params += [param]
         page.scope_param = FullRangeParameter(
-            [self.plugins.env.signals.env_output], "", [0, 4096]
+            [self.plugins.env.signals.env_output], "", None, [0, 4096]
         )
         return page
 
@@ -539,8 +583,8 @@ class mix_env_filt(bl00mbox._patches._Patch):
         param = FullRangeParameter(
             [self.plugins.filter.signals.cutoff],
             "cutoff",
+            0.8,
             [13000, 26000],
-            default_norm=0.8,
         )
         param.signal_get_string = self.get_cutoff_string
         param.default_env_mod = 0.1
@@ -550,20 +594,18 @@ class mix_env_filt(bl00mbox._patches._Patch):
         param = FullRangeParameter(
             [self.plugins.filter.signals.reso],
             "reso",
+            0.27,
             [2048, 4096 * 7.5],
-            default_norm=0.27,
         )
         param.signal_get_string = self.get_reso_string
         param.modulated = True
         page.params += [param]
-        param = FullRangeParameter(
-            [self.plugins.filter.signals.mode], "mode", default_norm=0.45
-        )
+        param = FullRangeParameter([self.plugins.filter.signals.mode], "mode", 0.45)
         param.signal_get_string = self.get_mode_string
         param.modulated = True
         page.params += [param]
         param = FullRangeParameter(
-            [self.plugins.filter.signals.mix], "mix", [0, 32767], default_norm=1
+            [self.plugins.filter.signals.mix], "mix", 1, [0, 32767]
         )
         param.modulated = True
         page.params += [param]
@@ -571,12 +613,14 @@ class mix_env_filt(bl00mbox._patches._Patch):
 
 
 class MelodicApp(Application):
-    def __init__(self, app_ctx: ApplicationContext) -> None:
+    def __init__(self, app_ctx) -> None:
         super().__init__(app_ctx)
         self.PUR = (1, 0, 1)
         self.YEL = (1, 1, 0)
         self.CYA = (0, 1, 1)
         self.BLA = (0, 0, 0)
+        self.savefile_dir = "/flash/mono_synth"
+
         self.synths = []
         self.base_scale = [0, 2, 3, 5, 7, 8, 10]
         self.mid_point_petal = 0
@@ -605,7 +649,7 @@ class MelodicApp(Application):
         self.env_value = 0
         self.lfo_value = 0
 
-        self.init_print_pending = True
+        self.first_enter = True
         self.enter_done = False
 
         self._scale_setup_highlight = 0
@@ -647,7 +691,7 @@ class MelodicApp(Application):
     def draw(self, ctx):
         if self.blm is None:
             return
-        if not self.enter_done:
+        if not self.enter_done and self.active_page < len(self.pages):
             self.pages[self.active_page].full_redraw = True
         self.env_value = self._signal_env.value / 4096
         self.lfo_value = self._signal_lfo.value / 4096 + 0.5
@@ -822,7 +866,7 @@ class MelodicApp(Application):
     def draw_page(self, ctx, page):
         if page.full_redraw:
             ctx.rgb(0, 0, 0).rectangle(-120, -120, 240, 240).fill()
-            self.draw_title(ctx, page.name)
+            self.draw_title(ctx, page.display_name)
         modulated = False
         for i, param in enumerate(page.params):
             if i >= 4:
@@ -881,7 +925,7 @@ class MelodicApp(Application):
         if modulated:
             self.draw_modulator_indicator(ctx)
         elif page.toggle is not None:
-            if page.toggle.full_redraw:
+            if page.toggle.full_redraw or page.full_redraw:
                 if page.toggle.value:
                     self.draw_modulator_indicator(
                         ctx, page.toggle.name + ": on", col=self.CYA
@@ -1067,6 +1111,7 @@ class MelodicApp(Application):
         self.synths = []
         self.oscs = [[]] * self.polyphony
         self.pages = []
+        self.osc_pages = []
 
         self.osc_targets = self.osc_targets[:4]
         num_oscs = len(self.osc_targets)
@@ -1077,14 +1122,17 @@ class MelodicApp(Application):
             synth.signals.pitch = self.poly_squeeze.signals.pitch_out[i]
             self.synths += [synth]
 
+        self.lfo = self.blm.new(rand_lfo)
+        self.lfo.signals.dummy = self.blm.mixer
+
+        self._signal_lfo = self.lfo.signals.output
+        self._signal_env = self.synths[0].plugins.env.signals.env_output
+
         mixer_page = self.synths[0].make_mixer_page()
         mixer_page.params = mixer_page.params[:4]
         draw_mixer = num_oscs > 1
-        if draw_mixer:
-            self.pages += [mixer_page]
 
-        self.lfo = self.blm.new(rand_lfo)
-        self.lfo.signals.dummy = self.blm.mixer
+        self.pages += [mixer_page]
 
         for i in range(self.polyphony):
             for j, osc_target in enumerate(self.osc_targets):
@@ -1092,14 +1140,13 @@ class MelodicApp(Application):
                 osc.signals.pitch = self.synths[i].signals.osc_pitch[j]
                 osc.signals.output = self.synths[i].signals.osc_input[j]
                 mixer_page.params[j].name = osc.name
-                if not draw_mixer:
-                    mixer_page.params[j].name = "osc"
                 make_page = getattr(osc, "make_page", None)
                 if make_page is not None:
                     page = make_page()
                     if not draw_mixer:
-                        page.name = "osc"
+                        page.display_name = "osc"
                     self.pages += [page]
+                    self.osc_pages += [page]
                 self.oscs[i] += [osc]
 
         self.pages += [self.synths[0].make_filter_page()]
@@ -1109,12 +1156,12 @@ class MelodicApp(Application):
         for page in self.pages:
             page.finalize(
                 self.blm,
-                self.lfo.signals.output,
-                [self.synths[0].plugins.env.signals.env_output],
+                self._signal_lfo,
+                [self._signal_env],
             )
 
-        self._signal_env = self.synths[0].plugins.env.signals.env_output
-        self._signal_lfo = self.lfo.signals.output
+        if not draw_mixer:
+            self.pages.remove(mixer_page)
 
     def update_leds(self, init=False):
         norm = self.env_value / 2 + 0.5
@@ -1143,11 +1190,21 @@ class MelodicApp(Application):
         self.make_scale()
         self.update_leds(init=True)
         self.enter_done = False
+        if not self.mode_main and self.active_page < len(self.pages):
+            self.pages[self.active_page].full_redraw = True
+        if self.first_enter:
+            self.save_sound_settings("defaults.json")
+            self.save_notes_settings("defaults.json")
+            self.first_enter = False
+        self.load_sound_settings("autosave.json")
+        self.load_notes_settings("autosave.json")
 
     def on_enter_done(self):
         self.enter_done = True
 
     def on_exit(self):
+        self.save_sound_settings("autosave.json")
+        self.save_notes_settings("autosave.json")
         if self.blm is not None:
             self.blm.clear()
             self.blm.free = True
@@ -1199,7 +1256,7 @@ class MelodicApp(Application):
         if min(self.scale) == self.min_note:
             self.at_min_note = True
 
-    def think(self, ins: InputState, delta_ms: int) -> None:
+    def think(self, ins, delta_ms) -> None:
         if self.blm is None:
             return
         super().think(ins, delta_ms)
@@ -1207,6 +1264,8 @@ class MelodicApp(Application):
         if self.input.buttons.app.middle.pressed:
             self.mode_main = not self.mode_main
             if not self.mode_main:
+                if self.active_page < len(self.pages):
+                    self.pages[self.active_page].full_redraw = True
                 for i in range(1, 10, 2):
                     self.poly_squeeze.signals.trigger_in[i].stop()
         elif self.input.buttons.app.right.pressed:
@@ -1364,6 +1423,150 @@ class MelodicApp(Application):
                 new_scale.sort()
                 self.base_scale = new_scale
                 self.make_scale()
+
+    def get_sound_settings(self):
+        sound_settings = {}
+        for page in self.pages:
+            sound_settings[page.name] = page.get_settings()
+        return sound_settings
+
+    def get_notes_settings(self):
+        notes_settings = {
+            "base scale": self.base_scale,
+            "mid point": self.mid_point,
+            "mid point petal": self.mid_point_petal,
+        }
+        return notes_settings
+
+    def set_sound_settings(self, settings):
+        for page in self.pages:
+            if page.name in settings.keys():
+                page.set_settings(settings[page.name])
+            else:
+                print(f"no setting found for {page.name}")
+
+    def set_notes_settings(self, settings):
+        self.base_scale = settings["base scale"]
+        self.mid_point = settings["mid point"]
+        self.mid_point_petal = settings["mid point petal"]
+        self.make_scale()
+
+    def load_sound_settings_file(self, filename):
+        path = self.savefile_dir + "/sounds/" + filename
+        settings = None
+        try:
+            with open(path, "r") as f:
+                return json.load(f)
+        except OSError as e:
+            return
+
+    def load_sound_settings(self, filename):
+        settings = self.load_sound_settings_file(filename)
+        if settings is not None:
+            self.set_sound_settings(settings)
+        else:
+            print("could not load sound settings")
+
+    def save_sound_settings(self, filename):
+        settings = self.get_sound_settings()
+        old_settings = self.load_sound_settings_file(filename)
+        if old_settings is not None:
+            if dict_contains_dict(old_settings, settings):
+                return
+            settings = dict_absorb_dict(old_settings, settings)
+        path = self.savefile_dir + "/sounds"
+        fakemakedirs(path, exist_ok=True)
+        path += "/" + filename
+        try:
+            with open(path, "w+") as f:
+                f.write(json.dumps(settings))
+                f.close()
+        except OSError as e:
+            print("could not save sound settings")
+
+    def load_notes_settings_file(self, filename):
+        path = self.savefile_dir + "/notes/" + filename
+        try:
+            with open(path, "r") as f:
+                return json.load(f)
+        except OSError as e:
+            return
+
+    def load_notes_settings(self, filename):
+        settings = self.load_notes_settings_file(filename)
+        if settings is not None:
+            self.set_notes_settings(settings)
+        else:
+            print("could not load notes settings")
+
+    def save_notes_settings(self, filename):
+        settings = self.get_notes_settings()
+        old_settings = self.load_notes_settings_file(filename)
+        if old_settings is not None:
+            if dict_contains_dict(old_settings, settings):
+                return
+        path = self.savefile_dir + "/notes"
+        fakemakedirs(path, exist_ok=True)
+        path += "/" + filename
+        try:
+            with open(path, "w+") as f:
+                f.write(json.dumps(settings))
+                f.close()
+        except OSError as e:
+            print("could not save notes settings")
+
+
+def dict_contains_dict(container, containee):
+    """
+    checks if all key-value pairs in containee are also
+    present in container while recursing over dict values
+    and returns true if so.
+    note that key-value pairs in container don't have to
+    be present in containee for a true return.
+    """
+    for key in containee:
+        if key not in container:
+            return False
+        elif isinstance(containee[key], dict):
+            if not dict_contains_dict(container[key], containee[key]):
+                return False
+        elif container[key] != containee[key]:
+            # print(f"change in {key} from {container[key]} to {containee[key]}")
+            return False
+    return True
+
+
+def dict_absorb_dict(absorber, absorbee):
+    """
+    copies all recursive key-value pairs from absorbee
+    into absorber while keeping absorber as intact as
+    possible. returns absorber for chaining convenience,
+    but the argument is modified too.
+    """
+    for key in absorber:
+        if key in absorbee:
+            if isinstance(absorber[key], dict) and isinstance(absorbee[key], dict):
+                dict_absorb_dict(absorber[key], absorbee[key])
+            else:
+                absorber[key] = absorbee[key]
+    for key in absorbee:
+        if key not in absorber:
+            absorber[key] = absorbee[key]
+    return absorber
+
+
+def fakemakedirs(path, exist_ok=False):
+    # ugh
+    dirs = path.strip("/").split("/")
+    path_acc = ""
+    exists = True
+    for d in dirs:
+        path_acc += "/" + d
+        if not os.path.exists(path_acc):
+            exists = False
+            os.mkdir(path_acc)
+    if exists and not exist_ok:
+        raise OSError("exist_not_ok!!")
 
 
 # For running with `mpremote run`:
