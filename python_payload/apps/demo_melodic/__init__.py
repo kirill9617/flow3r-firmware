@@ -46,6 +46,7 @@ class ToggleParameter:
         self.name = name
         self.full_redraw = True
         self._value = False
+        self.changed = False
 
     @property
     def value(self):
@@ -54,6 +55,7 @@ class ToggleParameter:
     @value.setter
     def value(self, val):
         if self._value != val:
+            self.changed = True
             self._value = val
             self.full_redraw = True
 
@@ -644,6 +646,7 @@ class MelodicApp(Application):
         self.blm = None
         self.mode_main = True
         self.active_page = 0
+
         self.drone_toggle = ToggleParameter("drone")
 
         self.env_value = 0
@@ -1260,6 +1263,12 @@ class MelodicApp(Application):
         if self.blm is None:
             return
         super().think(ins, delta_ms)
+
+        if self.drone_toggle.changed and not self.drone_toggle.value:
+            for i in range(10):
+                if not ins.captouch.petals[i].pressed:
+                    self.poly_squeeze.signals.trigger_in[i].stop()
+            self.drone_toggle.changed = False
 
         if self.input.buttons.app.middle.pressed:
             self.mode_main = not self.mode_main
