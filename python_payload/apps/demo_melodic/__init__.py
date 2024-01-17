@@ -16,6 +16,20 @@ class Page:
         self.finalized = False
         self.full_redraw = True
 
+    def think(self, ins, delta_ms, app):
+        pass
+
+    def draw(self, ctx, app):
+        pass
+
+    def get_settings(self):
+        return None
+
+    def set_settings(self):
+        pass
+
+
+class ParameterPage(Page):
     def finalize(self, channel, lfo_signal, env_signals):
         for param in self.params:
             param.finalize(channel, lfo_signal, env_signals)
@@ -39,6 +53,105 @@ class Page:
                 param.set_settings(settings[param.name])
             else:
                 print(f"no setting found for {self.name}->{param.name}")
+
+    def think(self, ins, delta_ms, app):
+        modulated = False
+        for i, param in enumerate(self.params):
+            if param.modulated:
+                modulated = True
+            val = app.petal_val[app.petal_index[i]][0]
+            if val is not None:
+                if param.modulated:
+                    if self.subwindow == 0:
+                        param.norm = val
+                    if self.subwindow == 1:
+                        param.env_norm = app.center_notch(val)
+                    if self.subwindow == 2:
+                        param.lfo_norm = app.center_notch(val)
+                else:
+                    param.norm = val
+        if self.toggle is not None:
+            if self.subwindow > 0:
+                self.subwindow = 0
+                self.toggle.value = not self.toggle.value
+        elif modulated:
+            self.subwindow %= 3
+        else:
+            self.subwindow %= 1
+
+    def draw(self, ctx, app):
+        if self.full_redraw:
+            ctx.rgb(0, 0, 0).rectangle(-120, -120, 240, 240).fill()
+            app.draw_title(ctx, self.display_name)
+        modulated = False
+        for i, param in enumerate(self.params):
+            if i >= 4:
+                continue
+            if param.modulated:
+                modulated = True
+                plusminus = True
+                redraw = 2
+                if self.subwindow == 0:
+                    val = param.norm
+                    plusminus = False
+                    if param.norm_changed:
+                        param.norm_changed = False
+                        redraw = 1
+                elif self.subwindow == 1:
+                    val = param.env_norm
+                    if param.env_norm_changed:
+                        param.env_norm_changed = False
+                        redraw = 1
+                elif self.subwindow == 2:
+                    val = param.lfo_norm
+                    if param.lfo_norm_changed:
+                        param.lfo_norm_changed = False
+                        redraw = 1
+                if self.full_redraw:
+                    redraw = 0
+                app.draw_bar_graph(
+                    ctx,
+                    app.petal_index[i],
+                    [val, param.mod_norms[0]],
+                    param.name,
+                    param.unit,
+                    sub=self.subwindow,
+                    plusminus=plusminus,
+                    skip_redraw=redraw,
+                )
+            else:
+                if self.full_redraw:
+                    redraw = 0
+                elif param.norm_changed:
+                    redraw = 1
+                else:
+                    redraw = 2
+                if redraw != 2:
+                    param.norm_changed = False
+                    app.draw_bar_graph(
+                        ctx,
+                        app.petal_index[i],
+                        param.norm,
+                        param.name,
+                        param.unit,
+                        skip_redraw=redraw,
+                    )
+        if self.scope_param is not None:
+            app.draw_scope(ctx, self.scope_param)
+        if modulated:
+            app.draw_modulator_indicator(ctx, sub=self.subwindow)
+        elif self.toggle is not None:
+            if self.toggle.full_redraw or self.full_redraw:
+                if self.toggle.value:
+                    app.draw_modulator_indicator(
+                        ctx, self.toggle.name + ": on", col=app.CYA
+                    )
+                else:
+                    app.draw_modulator_indicator(
+                        ctx, self.toggle.name + ": off", col=app.PUR
+                    )
+            self.toggle.full_redraw = False
+        self.full_redraw = False
 
 
 class ToggleParameter:
@@ -66,7 +179,7 @@ class ToggleParameter:
         self.value = settings["val"]
 
 
-class FullRangeParameter:
+class Parameter:
     def __init__(
         self,
         signals,
@@ -275,8 +388,8 @@ class hard_sync_osc(bl00mbox._patches._Patch):
         self.signals.output = self.plugins.main_osc.signals.output
 
     def make_page(self):
-        page = Page(self.name)
-        param = FullRangeParameter(
+        page = ParameterPage(self.name)
+        param = Parameter(
             [self.plugins.mp.signals.shift[1]],
             "focus",
             0.2,
@@ -284,7 +397,7 @@ class hard_sync_osc(bl00mbox._patches._Patch):
             modulated=True,
         )
         page.params += [param]
-        param = FullRangeParameter(
+        param = Parameter(
             [self.plugins.mp.signals.shift[0]],
             "disrupt",
             0,
@@ -292,7 +405,7 @@ class hard_sync_osc(bl00mbox._patches._Patch):
             modulated=True,
         )
         page.params += [param]
-        param = FullRangeParameter(
+        param = Parameter(
             [self.plugins.main_osc.signals.waveform],
             "wave",
             0.33,
@@ -350,8 +463,8 @@ class detune_osc(bl00mbox._patches._Patch):
         self.signals.output = self.plugins.mixer.signals.output
 
     def make_page(self):
-        page = Page(self.name)
-        param = FullRangeParameter(
+        page = ParameterPage(self.name)
+        param = Parameter(
             [self.plugins.ranges[1].signals.input],
             "detune",
             0.15,
@@ -359,14 +472,14 @@ class detune_osc(bl00mbox._patches._Patch):
         )
         param.default_env_mod = 1
         page.params += [param]
-        param = FullRangeParameter(
+        param = Parameter(
             [self.plugins.ranges[0].signals.input],
             "wave",
             0.98,
             modulated=True,
         )
         page.params += [param]
-        param = FullRangeParameter(
+        param = Parameter(
             [self.plugins.mixer.signals.gain],
             "dist",
             0.34,
@@ -376,7 +489,7 @@ class detune_osc(bl00mbox._patches._Patch):
         param.default_env_mod = 1
         param.default_lfo_mod = 0.4
         page.params += [param]
-        param = FullRangeParameter(
+        param = Parameter(
             [self.plugins.mixer.signals.input_gain[3]],
             "noise",
             0,
@@ -428,19 +541,19 @@ class rand_lfo(bl00mbox._patches._Patch):
         return f"{val:.2f}Hz"
 
     def make_page(self):
-        page = Page("lfo")
-        param = FullRangeParameter([self.plugins.osc.signals.waveform], "wave", 0.33)
+        page = ParameterPage("lfo")
+        param = Parameter([self.plugins.osc.signals.waveform], "wave", 0.33)
         page.params += [param]
-        param = FullRangeParameter([self.plugins.osc.signals.morph], "morph", 0.50)
+        param = Parameter([self.plugins.osc.signals.morph], "morph", 0.50)
         page.params += [param]
-        param = FullRangeParameter(
+        param = Parameter(
             [self.plugins.noise_vol.signals.input_gain[0]],
             "rng",
             0.41,
             [0, 768],
         )
         page.params += [param]
-        param = FullRangeParameter(
+        param = Parameter(
             [self.plugins.noise_shift.signals.input],
             "speed",
             0.65,
@@ -448,9 +561,7 @@ class rand_lfo(bl00mbox._patches._Patch):
         )
         param.signal_get_string = rand_lfo.get_speed_string
         page.params += [param]
-        page.scope_param = FullRangeParameter(
-            [self.signals.output], "", None, [-2048, 2048]
-        )
+        page.scope_param = Parameter([self.signals.output], "", None, [-2048, 2048])
         return page
 
 
@@ -511,9 +622,9 @@ class mix_env_filt(bl00mbox._patches._Patch):
             return "mute"
 
     def make_mixer_page(self):
-        page = Page("mixer")
+        page = ParameterPage("mixer")
         for i in range(self._mixer_inputs):
-            param = FullRangeParameter(
+            param = Parameter(
                 [self.plugins.mixer.signals.input_gain[i]],
                 "chan " + str(i + 1),
                 0.818,
@@ -530,29 +641,25 @@ class mix_env_filt(bl00mbox._patches._Patch):
         return str(int(signal.value)) + "ms"
 
     def make_env_page(self, toggle=None):
-        page = Page("env")
+        page = ParameterPage("env")
         if toggle is not None:
             page.toggle = toggle
-        param = FullRangeParameter(
-            [self.plugins.env.signals.attack], "attack", 0.091, [0, 1000]
-        )
+        param = Parameter([self.plugins.env.signals.attack], "attack", 0.091, [0, 1000])
         param.signal_get_string = self.get_ms_string
         page.params += [param]
-        param = FullRangeParameter(
-            [self.plugins.env.signals.decay], "decay", 0.247, [0, 1000]
-        )
+        param = Parameter([self.plugins.env.signals.decay], "decay", 0.247, [0, 1000])
         param.signal_get_string = self.get_ms_string
         page.params += [param]
-        param = FullRangeParameter(
+        param = Parameter(
             [self.plugins.env.signals.sustain], "sustain", 0.2, [0, 32767]
         )
         page.params += [param]
-        param = FullRangeParameter(
+        param = Parameter(
             [self.plugins.env.signals.release], "release", 0.236, [0, 1000]
         )
         param.signal_get_string = self.get_ms_string
         page.params += [param]
-        page.scope_param = FullRangeParameter(
+        page.scope_param = Parameter(
             [self.plugins.env.signals.env_output], "", None, [0, 4096]
         )
         return page
@@ -574,8 +681,8 @@ class mix_env_filt(bl00mbox._patches._Patch):
         return ["lp", "lp+bp", "bp", "bp+hp", "hp"][int(val)]
 
     def make_filter_page(self):
-        page = Page("filter")
-        param = FullRangeParameter(
+        page = ParameterPage("filter")
+        param = Parameter(
             [self.plugins.filter.signals.cutoff],
             "cutoff",
             0.8,
@@ -586,7 +693,7 @@ class mix_env_filt(bl00mbox._patches._Patch):
         param.default_lfo_mod = 0.45
         param.modulated = True
         page.params += [param]
-        param = FullRangeParameter(
+        param = Parameter(
             [self.plugins.filter.signals.reso],
             "reso",
             0.27,
@@ -595,13 +702,11 @@ class mix_env_filt(bl00mbox._patches._Patch):
         param.signal_get_string = self.get_reso_string
         param.modulated = True
         page.params += [param]
-        param = FullRangeParameter([self.plugins.filter.signals.mode], "mode", 0.45)
+        param = Parameter([self.plugins.filter.signals.mode], "mode", 0.45)
         param.signal_get_string = self.get_mode_string
         param.modulated = True
         page.params += [param]
-        param = FullRangeParameter(
-            [self.plugins.filter.signals.mix], "mix", 1, [0, 32767]
-        )
+        param = Parameter([self.plugins.filter.signals.mix], "mix", 1, [0, 32767])
         param.modulated = True
         page.params += [param]
         return page
@@ -614,7 +719,7 @@ class MelodicApp(Application):
         self.YEL = (1, 1, 0)
         self.CYA = (0, 1, 1)
         self.BLA = (0, 0, 0)
-        self.savefile_dir = "/flash/mono_synth"
+        self.savefile_dir = "/sd/mono_synth"
 
         self.synths = []
         self.base_scale = [0, 2, 3, 5, 7, 8, 10]
@@ -687,18 +792,14 @@ class MelodicApp(Application):
     def draw(self, ctx):
         if self.blm is None:
             return
-        if not self.enter_done and self.active_page < len(self.pages):
+        if not self.enter_done and not self.mode_main:
             self.pages[self.active_page].full_redraw = True
         self.env_value = self._signal_env.value / 4096
         self.lfo_value = self._signal_lfo.value / 4096 + 0.5
         if self.mode_main:
             self.draw_main(ctx)
             return
-        overhang = self.active_page - len(self.pages)
-        if overhang >= 0:
-            self.draw_setup(ctx)
-            return
-        self.draw_page(ctx, self.pages[self.active_page])
+        self.pages[self.active_page].draw(ctx, self)
 
     def draw_title(self, ctx, name):
         ctx.save()
@@ -712,10 +813,7 @@ class MelodicApp(Application):
         ctx.text(name)
         ctx.restore()
 
-    def draw_modulator_indicator(self, ctx, text=None, subtext=None, col=None):
-        sub = 0
-        if self.active_page < len(self.pages):
-            sub = self.pages[self.active_page].subwindow
+    def draw_modulator_indicator(self, ctx, text=None, subtext=None, col=None, sub=0):
         ctx.save()
         ctx.rgb(*self.PUR)
         ctx.arc(0, 150, 100, 0, math.tau, 1).fill()
@@ -859,80 +957,6 @@ class MelodicApp(Application):
 
         ctx.restore()
 
-    def draw_page(self, ctx, page):
-        if page.full_redraw:
-            ctx.rgb(0, 0, 0).rectangle(-120, -120, 240, 240).fill()
-            self.draw_title(ctx, page.display_name)
-        modulated = False
-        for i, param in enumerate(page.params):
-            if i >= 4:
-                continue
-            if param.modulated:
-                modulated = True
-                plusminus = True
-                redraw = 2
-                if page.subwindow == 0:
-                    val = param.norm
-                    plusminus = False
-                    if param.norm_changed:
-                        param.norm_changed = False
-                        redraw = 1
-                elif page.subwindow == 1:
-                    val = param.env_norm
-                    if param.env_norm_changed:
-                        param.env_norm_changed = False
-                        redraw = 1
-                elif page.subwindow == 2:
-                    val = param.lfo_norm
-                    if param.lfo_norm_changed:
-                        param.lfo_norm_changed = False
-                        redraw = 1
-                if page.full_redraw:
-                    redraw = 0
-                self.draw_bar_graph(
-                    ctx,
-                    self.petal_index[i],
-                    [val, param.mod_norms[0]],
-                    param.name,
-                    param.unit,
-                    sub=page.subwindow,
-                    plusminus=plusminus,
-                    skip_redraw=redraw,
-                )
-            else:
-                if page.full_redraw:
-                    redraw = 0
-                elif param.norm_changed:
-                    redraw = 1
-                else:
-                    redraw = 2
-                if redraw != 2:
-                    param.norm_changed = False
-                    self.draw_bar_graph(
-                        ctx,
-                        self.petal_index[i],
-                        param.norm,
-                        param.name,
-                        param.unit,
-                        skip_redraw=redraw,
-                    )
-        if page.scope_param is not None:
-            self.draw_scope(ctx, page.scope_param)
-        if modulated:
-            self.draw_modulator_indicator(ctx)
-        elif page.toggle is not None:
-            if page.toggle.full_redraw or page.full_redraw:
-                if page.toggle.value:
-                    self.draw_modulator_indicator(
-                        ctx, page.toggle.name + ": on", col=self.CYA
-                    )
-                else:
-                    self.draw_modulator_indicator(
-                        ctx, page.toggle.name + ": off", col=self.PUR
-                    )
-            page.toggle.full_redraw = False
-        page.full_redraw = False
-
     def draw_scope(self, ctx, param):
         ctx.save()
         ctx.rgb(1, 1, 0)
@@ -943,86 +967,6 @@ class MelodicApp(Application):
         ctx.rgb(1, 0, 1)
         ctx.arc(0, 0, 25, 0, math.tau, 1).stroke()
         ctx.restore()
-
-    def draw_setup(self, ctx):
-        ctx.rgb(0, 0, 0).rectangle(-120, -120, 240, 240).fill()
-        # self.draw_modulator_indicator(ctx, "back", col=self.PUR)
-        ctx.save()
-        self.draw_scale_setup(ctx)
-        ctx.restore()
-
-    def draw_scale_setup(self, ctx):
-        self.draw_title(ctx, "scale")
-        ctx.rgb(*self.YEL)
-        if self._scale_setup_root_mode:
-            # note
-            ctx.arc(68, -84, 2, 0, math.tau, 0)
-            ctx.move_to(68 + 2, -84)
-            ctx.rel_line_to(0, -7)
-            ctx.rel_line_to(3, 2)
-            ctx.stroke()
-        else:
-            # bars
-            ctx.rectangle(68 - 2, -85, 3, 3).stroke()
-            ctx.rectangle(68 + 2, -85, 3, -6).stroke()
-        # root
-        ctx.move_to(-68 + 3, -91)
-        ctx.rel_line_to(-6, 0)
-        ctx.rel_line_to(-3, 9)
-        ctx.rel_line_to(-2, -6)
-        ctx.stroke()
-        # arrows
-        for sign in [-1, 1]:
-            ctx.move_to(100 * sign, 50)
-
-            ctx.rel_line_to(-6 * sign, -4)
-            ctx.rel_line_to(0, 8)
-            ctx.rel_line_to(6 * sign, -4)
-            ctx.stroke()
-
-        ctx.text_align = ctx.LEFT
-        radius = 500
-        ctx.translate(0, radius - 25)
-        ctx.rotate(0.25 * math.tau)
-        step = 0.033
-        oversize = 1.2
-        if self._scale_setup_root_mode:
-            oversize = 1
-        ctx.rotate((-4.5 - oversize) * step)
-        ctx.font_size = 16
-        ctx.font = "Arimo Bold"
-        for tone in range(12):
-            tone = (tone + self._scale_setup_root) % 12
-            note = bl00mbox.helpers.sct_to_note_name(tone * 200 + 18367)
-            active = tone in self.base_scale
-            size = 1
-            if tone == self._scale_setup_highlight and not self._scale_setup_root_mode:
-                size = oversize
-            if size > 1:
-                size = 1.5
-                ctx.rotate((oversize - 1) * step)
-                ctx.rgb(*self.CYA)
-                if active:
-                    ctx.rectangle(-radius - 5, -5 * size, -20 * size, 10 * size).fill()
-                ctx.rectangle(-radius - 5, -5 * size, -20 * size, 10 * size).stroke()
-                ctx.rgb(*self.PUR)
-                if not active:
-                    ctx.rectangle(-radius, -5 * size, 10 * size, 10 * size).fill()
-                ctx.rectangle(-radius, -5 * size, 10 * size, 10 * size).stroke()
-            else:
-                if active:
-                    ctx.rgb(*self.CYA)
-                    ctx.rectangle(-radius - 5, -5, -20, 10).fill()
-                else:
-                    ctx.rgb(*self.PUR)
-                    ctx.rectangle(-radius, -5, 10, 10).fill()
-
-            ctx.rgb(*self.PUR)
-            ctx.move_to(22 - radius, 5)
-            ctx.text(note[:-1])
-            ctx.rotate(step)
-            if size > 1:
-                ctx.rotate((oversize - 1) * step)
 
     def draw_main(self, ctx):
         ctx.rgb(0, 0, 0).rectangle(-120, -120, 240, 240).fill()
@@ -1158,6 +1102,8 @@ class MelodicApp(Application):
         if not draw_mixer:
             self.pages.remove(mixer_page)
 
+        self.pages += [ScalePage("scale")]
+
     def update_leds(self, init=False):
         norm = self.env_value / 2 + 0.5
         yel = [x * norm for x in self.YEL]
@@ -1185,7 +1131,7 @@ class MelodicApp(Application):
         self.make_scale()
         self.update_leds(init=True)
         self.enter_done = False
-        if not self.mode_main and self.active_page < len(self.pages):
+        if not self.mode_main:
             self.pages[self.active_page].full_redraw = True
         if self.first_enter:
             self.save_sound_settings("defaults.json")
@@ -1198,6 +1144,8 @@ class MelodicApp(Application):
         self.enter_done = True
 
     def on_exit(self):
+        if self.blm is not None:
+            self.blm.volume = 0
         self.save_sound_settings("autosave.json")
         self.save_notes_settings("autosave.json")
         if self.blm is not None:
@@ -1251,7 +1199,7 @@ class MelodicApp(Application):
         if min(self.scale) == self.min_note:
             self.at_min_note = True
 
-    def think(self, ins, delta_ms) -> None:
+    def think(self, ins, delta_ms):
         if self.blm is None:
             return
         super().think(ins, delta_ms)
@@ -1265,24 +1213,21 @@ class MelodicApp(Application):
         if self.input.buttons.app.middle.pressed:
             self.mode_main = not self.mode_main
             if not self.mode_main:
-                if self.active_page < len(self.pages):
-                    self.pages[self.active_page].full_redraw = True
+                self.pages[self.active_page].full_redraw = True
                 for i in range(1, 10, 2):
                     self.poly_squeeze.signals.trigger_in[i].stop()
         elif self.input.buttons.app.right.pressed:
             if self.mode_main:
                 self.shift_playing_field_by_num_petals(4)
             else:
-                self.active_page = (self.active_page + 1) % (len(self.pages) + 1)
-                if self.active_page < len(self.pages):
-                    self.pages[self.active_page].full_redraw = True
+                self.active_page = (self.active_page + 1) % len(self.pages)
+                self.pages[self.active_page].full_redraw = True
         elif self.input.buttons.app.left.pressed:
             if self.mode_main:
                 self.shift_playing_field_by_num_petals(-4)
             else:
-                self.active_page = (self.active_page - 1) % (len(self.pages) + 1)
-                if self.active_page < len(self.pages):
-                    self.pages[self.active_page].full_redraw = True
+                self.active_page = (self.active_page - 1) % len(self.pages)
+                self.pages[self.active_page].full_redraw = True
 
         if self.mode_main:
             playable_petals = range(10)
@@ -1319,10 +1264,6 @@ class MelodicApp(Application):
 
         if self.mode_main:
             return
-        overhang = self.active_page - len(self.pages)
-        if overhang >= 0:
-            self.think_setup(ins)
-            return
 
         for petal in [7, 9, 1, 3]:
             petal_len = len(self.petal_val[petal])
@@ -1349,7 +1290,7 @@ class MelodicApp(Application):
                 self.pages[self.active_page].full_redraw = True
             self.petal_val[5] = tmp
 
-        self.think_page(self.pages[self.active_page])
+        self.pages[self.active_page].think(ins, delta_ms, self)
 
     @staticmethod
     def center_notch(val, deadzone=0.1):
@@ -1361,74 +1302,11 @@ class MelodicApp(Application):
             return 1 - (1 - val) * gain
         return 0.5
 
-    def think_page(self, page):
-        modulated = False
-        for i, param in enumerate(page.params):
-            if param.modulated:
-                modulated = True
-            val = self.petal_val[self.petal_index[i]][0]
-            if val is not None:
-                if param.modulated:
-                    if page.subwindow == 0:
-                        param.norm = val
-                    if page.subwindow == 1:
-                        param.env_norm = self.center_notch(val)
-                    if page.subwindow == 2:
-                        param.lfo_norm = self.center_notch(val)
-                else:
-                    param.norm = val
-        if page.toggle is not None:
-            if page.subwindow > 0:
-                page.subwindow = 0
-                page.toggle.value = not page.toggle.value
-        elif modulated:
-            page.subwindow %= 3
-        else:
-            page.subwindow %= 1
-
-    def think_setup(self, ins):
-        self.think_scale_setup(ins)
-
-    def think_scale_setup(self, ins):
-        root_shift = 0
-        if self.input.captouch.petals[7].whole.pressed:
-            self._scale_setup_highlight = (self._scale_setup_highlight - 1) % 12
-            if self._scale_setup_root_mode:
-                self._scale_setup_root = (self._scale_setup_root - 1) % 12
-                root_shift = -1
-        if self.input.captouch.petals[3].whole.pressed:
-            self._scale_setup_highlight = (self._scale_setup_highlight + 1) % 12
-            if self._scale_setup_root_mode:
-                self._scale_setup_root = (self._scale_setup_root + 1) % 12
-                root_shift = 1
-
-        if self.input.captouch.petals[9].whole.pressed:
-            self._scale_setup_root_mode = True
-
-        if root_shift != 0:
-            new_scale = [(x + root_shift) % 12 for x in self.base_scale]
-            new_scale.sort()
-            self.base_scale = new_scale
-            self.make_scale()
-
-        if self.input.captouch.petals[1].whole.pressed:
-            if self._scale_setup_root_mode:
-                self._scale_setup_root_mode = False
-            else:
-                index = self._scale_setup_highlight
-                new_scale = list(self.base_scale)
-                if index in new_scale:
-                    new_scale.remove(index)
-                else:
-                    new_scale += [index]
-                new_scale.sort()
-                self.base_scale = new_scale
-                self.make_scale()
-
     def get_sound_settings(self):
         sound_settings = {}
         for page in self.pages:
-            sound_settings[page.name] = page.get_settings()
+            if isinstance(Page, ParameterPage):
+                sound_settings[page.name] = page.get_settings()
         return sound_settings
 
     def get_notes_settings(self):
@@ -1441,10 +1319,11 @@ class MelodicApp(Application):
 
     def set_sound_settings(self, settings):
         for page in self.pages:
-            if page.name in settings.keys():
-                page.set_settings(settings[page.name])
-            else:
-                print(f"no setting found for {page.name}")
+            if isinstance(Page, ParameterPage):
+                if page.name in settings.keys():
+                    page.set_settings(settings[page.name])
+                else:
+                    print(f"no setting found for {page.name}")
 
     def set_notes_settings(self, settings):
         self.base_scale = settings["base scale"]
@@ -1476,9 +1355,9 @@ class MelodicApp(Application):
                 return
             settings = dict_absorb_dict(old_settings, settings)
         path = self.savefile_dir + "/sounds"
-        fakemakedirs(path, exist_ok=True)
-        path += "/" + filename
         try:
+            fakemakedirs(path, exist_ok=True)
+            path += "/" + filename
             with open(path, "w+") as f:
                 f.write(json.dumps(settings))
                 f.close()
@@ -1507,14 +1386,22 @@ class MelodicApp(Application):
             if dict_contains_dict(old_settings, settings):
                 return
         path = self.savefile_dir + "/notes"
-        fakemakedirs(path, exist_ok=True)
-        path += "/" + filename
         try:
+            fakemakedirs(path, exist_ok=True)
+            path += "/" + filename
             with open(path, "w+") as f:
                 f.write(json.dumps(settings))
                 f.close()
         except OSError as e:
             print("could not save notes settings")
+
+    def delete_notes_settings(self, filename):
+        path = self.savefile_dir + "/notes/" + filename
+        try:
+            os.remove(path)
+            return True
+        except OSError:
+            return False
 
 
 def dict_contains_dict(container, containee):
@@ -1554,6 +1441,359 @@ def dict_absorb_dict(absorber, absorbee):
         if key not in absorber:
             absorber[key] = absorbee[key]
     return absorber
+
+
+class ScalePage(Page):
+    def __init__(self, name="notes"):
+        super().__init__(name)
+        self.num_slots = 5
+        self.hold_time = 1500
+
+        self._slot = 0
+        self._slot_notes = [None] * self.num_slots
+        self._save_timer = 0
+        self._load_timer = 0
+        self._load_files_request = True
+
+    def slotpath(self, num=None):
+        if num is None:
+            num = self._slot
+        return "slot" + str(num + 1) + ".json"
+
+    def think(self, ins, delta_ms, app):
+        self.subwindow %= 2
+        if self.subwindow == 0:
+            self.think_scale_setup(ins, delta_ms, app)
+        elif self.subwindow == 1:
+            self.think_scale_saveload(ins, delta_ms, app)
+
+    def draw(self, ctx, app):
+        if self.full_redraw:
+            ctx.rgb(0, 0, 0).rectangle(-120, -120, 240, 240).fill()
+            app.draw_title(ctx, self.display_name)
+        if self.subwindow == 0:
+            self.draw_scale_setup(ctx, app)
+        elif self.subwindow == 1:
+            self.draw_scale_saveload(ctx, app)
+
+    def think_scale_setup(self, ins, delta_ms, app):
+        root_shift = 0
+        if app.input.captouch.petals[7].whole.pressed:
+            app._scale_setup_highlight = (app._scale_setup_highlight - 1) % 12
+            if app._scale_setup_root_mode:
+                app._scale_setup_root = (app._scale_setup_root - 1) % 12
+                root_shift = -1
+        if app.input.captouch.petals[3].whole.pressed:
+            app._scale_setup_highlight = (app._scale_setup_highlight + 1) % 12
+            if app._scale_setup_root_mode:
+                app._scale_setup_root = (app._scale_setup_root + 1) % 12
+                root_shift = 1
+
+        if app.input.captouch.petals[9].whole.pressed:
+            app._scale_setup_root_mode = True
+
+        if root_shift != 0:
+            new_scale = [(x + root_shift) % 12 for x in app.base_scale]
+            new_scale.sort()
+            app.base_scale = new_scale
+            app.make_scale()
+
+        if app.input.captouch.petals[1].whole.pressed:
+            if app._scale_setup_root_mode:
+                app._scale_setup_root_mode = False
+            else:
+                index = app._scale_setup_highlight
+                new_scale = list(app.base_scale)
+                if index in new_scale:
+                    new_scale.remove(index)
+                else:
+                    new_scale += [index]
+                new_scale.sort()
+                app.base_scale = new_scale
+                app.make_scale()
+
+    def draw_scale_setup(self, ctx, app):
+        if app._scale_setup_root_mode:
+            app.draw_modulator_indicator(ctx, "root shift", col=app.PUR)
+        else:
+            app.draw_modulator_indicator(ctx, "note on/off", col=app.PUR)
+        ctx.rgb(*app.YEL)
+        if app._scale_setup_root_mode:
+            # note
+            ctx.arc(68, -84, 2, 0, math.tau, 0)
+            ctx.move_to(68 + 2, -84)
+            ctx.rel_line_to(0, -7)
+            ctx.rel_line_to(3, 2)
+            ctx.stroke()
+        else:
+            # bars
+            ctx.rectangle(68 - 2, -85, 3, 3).stroke()
+            ctx.rectangle(68 + 2, -85, 3, -6).stroke()
+        # root
+        ctx.move_to(-68 + 3, -91)
+        ctx.rel_line_to(-6, 0)
+        ctx.rel_line_to(-3, 9)
+        ctx.rel_line_to(-2, -6)
+        ctx.stroke()
+        # arrows
+        for sign in [-1, 1]:
+            ctx.move_to(100 * sign, 50)
+
+            ctx.rel_line_to(-6 * sign, -4)
+            ctx.rel_line_to(0, 8)
+            ctx.rel_line_to(6 * sign, -4)
+            ctx.stroke()
+
+        ctx.text_align = ctx.LEFT
+        radius = 500
+        ctx.translate(0, radius - 25)
+        ctx.rotate(0.25 * math.tau)
+        step = 0.033
+        oversize = 1.2
+        if app._scale_setup_root_mode:
+            oversize = 1
+        ctx.rotate((-4.5 - oversize) * step)
+        ctx.font_size = 16
+        ctx.font = "Arimo Bold"
+        for tone in range(12):
+            tone = (tone + app._scale_setup_root) % 12
+            note = bl00mbox.helpers.sct_to_note_name(tone * 200 + 18367)
+            active = tone in app.base_scale
+            size = 1
+            if tone == app._scale_setup_highlight and not app._scale_setup_root_mode:
+                size = oversize
+            if size > 1:
+                size = 1.5
+                ctx.rotate((oversize - 1) * step)
+                ctx.rgb(*app.CYA)
+                if active:
+                    ctx.rectangle(-radius - 5, -5 * size, -20 * size, 10 * size).fill()
+                ctx.rectangle(-radius - 5, -5 * size, -20 * size, 10 * size).stroke()
+                ctx.rgb(*app.PUR)
+                if not active:
+                    ctx.rectangle(-radius, -5 * size, 10 * size, 10 * size).fill()
+                ctx.rectangle(-radius, -5 * size, 10 * size, 10 * size).stroke()
+            else:
+                if active:
+                    ctx.rgb(*app.CYA)
+                    ctx.rectangle(-radius - 5, -5, -20, 10).fill()
+                else:
+                    ctx.rgb(*app.PUR)
+                    ctx.rectangle(-radius, -5, 10, 10).fill()
+
+            ctx.rgb(*app.PUR)
+            ctx.move_to(22 - radius, 5)
+            ctx.text(note[:-1])
+            ctx.rotate(step)
+            if size > 1:
+                ctx.rotate((oversize - 1) * step)
+
+    def think_scale_saveload(self, ins, delta_ms, app):
+        if app.input.captouch.petals[7].whole.pressed:
+            self._slot = (self._slot - 1) % self.num_slots
+            self.full_redraw = True
+        if app.input.captouch.petals[3].whole.pressed:
+            self._slot = (self._slot + 1) % self.num_slots
+            self.full_redraw = True
+
+        if ins.captouch.petals[1].pressed:
+            if self._save_timer < self.hold_time:
+                self._save_timer += delta_ms
+                if self._save_timer >= self.hold_time and not self._load_timer:
+                    print("saving slot " + str(self._slot + 1))
+                    app.save_notes_settings(self.slotpath())
+                    self._load_files_request = True
+        else:
+            self._save_timer = 0
+
+        if ins.captouch.petals[9].pressed:
+            if self._load_timer < self.hold_time:
+                self._load_timer += delta_ms
+                if self._load_timer >= self.hold_time and not self._save_timer:
+                    if self._slot_notes[self._slot] is not None:
+                        print("loading slot " + str(self._slot + 1))
+                        app.load_notes_settings(self.slotpath())
+        else:
+            self._load_timer = 0
+
+        if (self._load_timer + self._save_timer) >= (2 * self.hold_time):
+            if self._load_timer < 33333 and (self._slot_notes[self._slot] is not None):
+                print("deleting slot " + str(self._slot + 1))
+                app.delete_notes_settings(self.slotpath())
+                self._load_timer = 33333
+                self._load_files_request = True
+
+        if self._load_files_request:
+            self.load_files(app)
+            self._load_files_request = False
+
+    def load_files(self, app):
+        for i in range(self.num_slots):
+            settings = app.load_notes_settings_file(self.slotpath(i))
+            if settings is None:
+                self._slot_notes[i] = None
+            else:
+                self._slot_notes[i] = list(settings["base scale"])
+        self.full_redraw = True
+
+    def draw_scale_saveload(self, ctx, app):
+        if self.full_redraw:
+            app.draw_modulator_indicator(ctx, "save/load", col=app.YEL)
+        ctx.text_align = ctx.CENTER
+        ctx.font = "Arimo Bold"
+        ctx.save()
+        load_possible = False
+        for i in range(3):
+            ctx.line_width = 3
+            j = i
+            if self._slot > (self.num_slots - 2):
+                j += self._slot - 2
+            elif self._slot > 1:
+                j += self._slot - 1
+            highlight = self._slot == j
+            if (not highlight) and (not self.full_redraw):
+                continue
+
+            xsize = 60
+            ysize = 80
+            center = (i - 1) * 70
+            yoffset = -10
+            ctx.rgb(*app.BLA)
+            ctx.rectangle(
+                center - 3 - xsize / 2, yoffset - 3 - ysize / 2, xsize + 6, ysize + 6
+            ).fill()
+
+            ctx.global_alpha = 0.5
+            ctx.font_size = 20
+            ctx.rgb(*app.PUR)
+
+            if highlight:
+                if self._slot_notes[j] is not None:
+                    load_possible = True
+                ctx.global_alpha = 1
+                if self._save_timer:
+                    pass
+                elif self._load_timer and load_possible:
+                    ybar = ysize * min(self._load_timer / self.hold_time, 1)
+                    ctx.rectangle(
+                        center - xsize / 2, yoffset - ybar + ysize / 2, xsize, ybar
+                    ).fill()
+
+            ctx.rgb(*app.CYA)
+            if self._slot_notes[j] is None:
+                ctx.move_to(center, yoffset + 5)
+                ctx.text(self.slotpath(j).split(".")[0])
+            else:
+                ctx.move_to(center, yoffset - ysize / 4 + 5)
+                ctx.text(self.slotpath(j).split(".")[0])
+                notes = list(self._slot_notes[j])
+                for k in range(12):
+                    dotsize = 9
+                    dotspace = 13
+                    doty = ((k // 4) * dotspace) - 11
+                    dotx = ((k % 4) - 1.5) * dotspace
+                    if k in notes:
+                        ctx.round_rectangle(
+                            center + dotx - dotsize / 2,
+                            doty - dotsize / 2,
+                            dotsize,
+                            dotsize,
+                            2,
+                        ).fill()
+
+            if highlight:
+                ctx.global_alpha = 1
+                if self._save_timer and self._load_timer:
+                    if load_possible:
+                        ctx.rgb(*app.BLA)
+                        ybar = (
+                            ysize
+                            * min(
+                                (self._save_timer + self._load_timer)
+                                / (2 * self.hold_time),
+                                1,
+                            )
+                            / 2
+                        )
+                        ctx.rectangle(
+                            center - xsize / 2, yoffset - ysize / 2, xsize, ybar
+                        ).fill()
+                        ctx.rectangle(
+                            center - xsize / 2, yoffset - ybar + ysize / 2, xsize, ybar
+                        ).fill()
+                        ctx.rgb(*app.CYA)
+                        ctx.line_width = 2
+                        ctx.move_to(
+                            center - xsize / 2, yoffset + ybar - ysize / 2
+                        ).rel_line_to(xsize, 0).stroke()
+                        ctx.move_to(
+                            center - xsize / 2, yoffset - ybar + ysize / 2
+                        ).rel_line_to(xsize, 0).stroke()
+                elif self._save_timer:
+                    ctx.rgb(*app.CYA)
+                    ybar = ysize * min(self._save_timer / self.hold_time, 1)
+                    ctx.rectangle(
+                        center - xsize / 2, yoffset - ybar + ysize / 2, xsize, ybar
+                    ).fill()
+            ctx.line_width = 3
+            ctx.rgb(*app.PUR)
+            ctx.round_rectangle(
+                center - 1 - xsize / 2, yoffset - 1 - ysize / 2, xsize + 2, ysize + 2, 5
+            ).stroke()
+
+        ctx.restore()
+
+        if self.full_redraw:
+            ctx.rgb(*app.BLA)
+            ctx.rectangle(-21, -66 - 16, 42, 18).fill()
+            ctx.rectangle(-21 - 63, -74 - 18, 42, 20).fill()
+
+            ctx.rgb(*app.YEL)
+
+            if load_possible:
+                ctx.global_alpha = 1
+            else:
+                ctx.global_alpha = 0.5
+            ctx.font_size = 14
+            ctx.move_to(0, -66)
+            ctx.text("delete")
+            ctx.font_size = 16
+            ctx.move_to(-63, -74)
+            ctx.text("load")
+
+            start_deg = 1.1 / 40
+            stop_deg = 1.65 / 40
+            ctx.arc(
+                0,
+                -130 - 100,
+                60 + 100,
+                math.tau * (0.25 + start_deg),
+                math.tau * (0.25 + stop_deg),
+                0,
+            ).stroke()
+            ctx.arc(
+                0,
+                -130 - 100,
+                60 + 100,
+                math.tau * (0.25 - stop_deg),
+                math.tau * (0.25 - start_deg),
+                0,
+            ).stroke()
+
+            ctx.global_alpha = 1
+
+            ctx.move_to(63, -74)
+            ctx.text("save")
+
+            # arrows
+            for sign in [-1, 1]:
+                ctx.move_to(100 * sign, 50)
+                ctx.rel_line_to(-6 * sign, -4)
+                ctx.rel_line_to(0, 8)
+                ctx.rel_line_to(6 * sign, -4)
+                ctx.stroke()
+
+            self.full_redraw = False
 
 
 def fakemakedirs(path, exist_ok=False):
