@@ -155,10 +155,6 @@ class FullRangeParameter:
             val = signal.value
             mod_mixer = channel.new(bl00mbox.plugins.mixer, 3)
             mod_shifter = None
-            # ughhhhh
-            dummy_mixer = channel.new(bl00mbox.plugins.mixer, 1)
-            dummy_mixer.signals.gain = 0
-            dummy_mixer.signals.output = channel.mixer
             if range_shift:
                 val = (val - self._output_min) / self._output_spread
                 val = (val * 64434) - 32767
@@ -171,10 +167,10 @@ class FullRangeParameter:
                 mod_shifter.signals.output = signal
                 self._output_min = -32767
                 self._output_spread = 65534
-                dummy_mixer.signals.input[0] = mod_shifter.signals.output
+                mod_shifter.always_render = True
             else:
                 mod_mixer.signals.output = signal
-                dummy_mixer.signals.input[0] = mod_mixer.signals.output
+                mod_mixer.always_render = True
             mod_mixer.signals.gain.mult = 2
             mod_mixer.signals.input[0] = val
             self._signals[i] = mod_mixer.signals.input[0]
@@ -397,7 +393,6 @@ class rand_lfo(bl00mbox._patches._Patch):
 
         self.plugins.osc = self._channel.new(bl00mbox.plugins.osc)
         self.plugins.range = self._channel.new(bl00mbox.plugins.range_shifter)
-        self.plugins.dummy = self._channel.new(bl00mbox.plugins.range_shifter)
         self.plugins.noise = self._channel.new(bl00mbox.plugins.noise_burst)
         self.plugins.noise_vol = self._channel.new(bl00mbox.plugins.mixer, 2)
         self.plugins.noise_shift = self._channel.new(bl00mbox.plugins.multipitch, 1)
@@ -419,15 +414,13 @@ class rand_lfo(bl00mbox._patches._Patch):
         self.plugins.range.signals.output_range[0] = -2048
         self.plugins.range.signals.output_range[1] = 2048
 
-        self.plugins.dummy.signals.output_range[0] = 0
-        self.plugins.dummy.signals.output_range[1] = 0
-        self.plugins.dummy.signals.input = self.plugins.range.signals.output
+        self.plugins.range.signals.speed.switch.SLOW = True
+        self.plugins.range.always_render = True
 
         self.plugins.noise_shift.signals.input.freq = 1
         self.plugins.noise_vol.signals.input_gain[0] = 0
         # read only
         self.signals.output = self.plugins.range.signals.output
-        self.signals.dummy = self.plugins.dummy.signals.output
 
     @staticmethod
     def get_speed_string(signal):
@@ -1126,7 +1119,6 @@ class MelodicApp(Application):
             self.synths += [synth]
 
         self.lfo = self.blm.new(rand_lfo)
-        self.lfo.signals.dummy = self.blm.mixer
 
         self._signal_lfo = self.lfo.signals.output
         self._signal_env = self.synths[0].plugins.env.signals.env_output
