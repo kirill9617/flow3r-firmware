@@ -30,7 +30,17 @@ class Page:
 
 
 class ParameterPage(Page):
+    def __init__(self, name, patch=None):
+        super().__init__(name)
+        self.patch = patch
+
+    def delete(self):
+        self.patch.delete()
+        for param in self.params:
+            param.delete()
+
     def finalize(self, channel, lfo_signal, env_signals):
+        self.params = self.params[:4]
         for param in self.params:
             param.finalize(channel, lfo_signal, env_signals)
         self.finalized = True
@@ -85,8 +95,6 @@ class ParameterPage(Page):
             app.draw_title(ctx, self.display_name)
         modulated = False
         for i, param in enumerate(self.params):
-            if i >= 4:
-                continue
             if param.modulated:
                 modulated = True
                 plusminus = True
@@ -205,6 +213,7 @@ class Parameter:
         self.signal_get_string = get_str
         self._signals = signals
         self._mod_mixers = []
+        self._mod_shifters = []
         self.name = name
         self.modulated = modulated
         self.finalized = False
@@ -281,6 +290,7 @@ class Parameter:
                 self._output_min = -32767
                 self._output_spread = 65534
                 mod_shifter.always_render = True
+                self._mod_shifters += [mod_shifter]
             else:
                 mod_mixer.signals.output = signal
                 mod_mixer.always_render = True
@@ -303,6 +313,10 @@ class Parameter:
         if self.modulated:
             self._create_modulator(channel, lfo_signal, env_signals)
         self.finalized = True
+
+    def delete(self):
+        for plugin in self._mod_shifters + self._mod_mixers:
+            plugin.delete()
 
     @property
     def mod_norms(self):
@@ -362,10 +376,47 @@ class Parameter:
                 self.env_norm = 0.5
 
 
-class hard_sync_osc(bl00mbox._patches._Patch):
+class dreamy_osc(bl00mbox.Patch):
+    name = "dream"
+
     def __init__(self, chan):
         super().__init__(chan)
-        self.name = "overtoner"
+
+        self.plugins.oscs = [self._channel.new(bl00mbox.plugins.osc) for x in range(4)]
+        self.plugins.mixer = self._channel.new(bl00mbox.plugins.mixer, 4)
+        self.plugins.mp = self._channel.new(bl00mbox.plugins.multipitch, 3)
+
+        self.plugins.mp.signals.thru = self.plugins.oscs[0].signals.pitch
+        for x in range(3):
+            self.plugins.mp.signals.output[x] = self.plugins.oscs[x + 1].signals.pitch
+            self.plugins.mp.signals.shift[x].tone = [12, 19, 28][x]
+        for x in range(4):
+            self.plugins.oscs[x].signals.waveform.switch.SINE = True
+            self.plugins.oscs[x].signals.output = self.plugins.mixer.signals.input[x]
+        self.plugins.mixer.gain = 4096 / 8 / 4
+
+        self.signals.pitch = self.plugins.mp.signals.input
+        self.signals.output = self.plugins.mixer.signals.output
+
+    def make_page(self):
+        page = ParameterPage(self.name, self)
+        names = ["root", "oct", "fifth", "third"]
+        for x in range(4):
+            param = Parameter(
+                [self.plugins.mixer.signals.input_gain[x]],
+                names[x],
+                0.5,
+                modulated=True,
+            )
+            page.params += [param]
+        return page
+
+
+class hard_sync_osc(bl00mbox.Patch):
+    name = "edge"
+
+    def __init__(self, chan):
+        super().__init__(chan)
 
         self.plugins.root_osc = self._channel.new(bl00mbox.plugins.osc)
         self.plugins.mod_osc = self._channel.new(bl00mbox.plugins.osc)
@@ -388,7 +439,7 @@ class hard_sync_osc(bl00mbox._patches._Patch):
         self.signals.output = self.plugins.main_osc.signals.output
 
     def make_page(self):
-        page = ParameterPage(self.name)
+        page = ParameterPage(self.name, self)
         param = Parameter(
             [self.plugins.mp.signals.shift[1]],
             "focus",
@@ -415,10 +466,11 @@ class hard_sync_osc(bl00mbox._patches._Patch):
         return page
 
 
-class detune_osc(bl00mbox._patches._Patch):
+class detune_osc(bl00mbox.Patch):
+    name = "acid"
+
     def __init__(self, chan):
         super().__init__(chan)
-        self.name = "detuner"
 
         self.plugins.oscs = [self._channel.new(bl00mbox.plugins.osc) for i in range(3)]
         self.plugins.ranges = [
@@ -463,7 +515,7 @@ class detune_osc(bl00mbox._patches._Patch):
         self.signals.output = self.plugins.mixer.signals.output
 
     def make_page(self):
-        page = ParameterPage(self.name)
+        page = ParameterPage(self.name, self)
         param = Parameter(
             [self.plugins.ranges[1].signals.input],
             "detune",
@@ -500,9 +552,10 @@ class detune_osc(bl00mbox._patches._Patch):
         return page
 
 
-class rand_lfo(bl00mbox._patches._Patch):
+class rand_lfo(bl00mbox.Patch):
     def __init__(self, chan):
         super().__init__(chan)
+        self.name = "lfo"
 
         self.plugins.osc = self._channel.new(bl00mbox.plugins.osc)
         self.plugins.range = self._channel.new(bl00mbox.plugins.range_shifter)
@@ -541,7 +594,7 @@ class rand_lfo(bl00mbox._patches._Patch):
         return f"{val:.2f}Hz"
 
     def make_page(self):
-        page = ParameterPage("lfo")
+        page = ParameterPage(self.name, self)
         param = Parameter([self.plugins.osc.signals.waveform], "wave", 0.33)
         page.params += [param]
         param = Parameter([self.plugins.osc.signals.morph], "morph", 0.50)
@@ -565,28 +618,24 @@ class rand_lfo(bl00mbox._patches._Patch):
         return page
 
 
-class mix_env_filt(bl00mbox._patches._Patch):
-    def __init__(self, chan, mixer_inputs=4):
+class mix_env_filt(bl00mbox.Patch):
+    def __init__(self, chan):
         super().__init__(chan)
-        self._mixer_inputs = mixer_inputs
 
-        self.plugins.mp = self._channel.new(bl00mbox.plugins.multipitch, 4)
+        self.plugins.mp = self._channel.new(bl00mbox.plugins.multipitch, 2)
 
-        self.plugins.mixer = self._channel.new(bl00mbox.plugins.mixer, mixer_inputs)
+        self.plugins.mixer = self._channel.new(bl00mbox.plugins.mixer, 2)
+        self.plugins.thru = self._channel.new(bl00mbox.plugins.range_shifter)
+        self.plugins.thru.always_render = True
 
         self.plugins.env = self._channel.new(bl00mbox.plugins.env_adsr)
         self.plugins.env.signals.input = self.plugins.mixer.signals.output
-        self.plugins.env.signals.release = 100
-        self.plugins.env.signals.decay = 500
-        self.plugins.env.signals.attack = 100
-        self.plugins.env.signals.sustain = 16000
 
         self.plugins.filter = self._channel.new(bl00mbox.plugins.filter)
-        self.plugins.filter.signals.cutoff = 22000
-        self.plugins.filter.signals.reso = 4096
-        self.plugins.filter.signals.gain.dB -= 6
-
         self.plugins.filter.signals.input = self.plugins.env.signals.output
+
+        self.plugins.tone = self._channel.new(bl00mbox.plugins.filter)
+        self.plugins.tone.signals.input = self.plugins.filter.signals.output
 
         self.signals.osc_input = self.plugins.mixer.signals.input
         self.signals.osc_pitch = self.plugins.mp.signals.output
@@ -594,8 +643,8 @@ class mix_env_filt(bl00mbox._patches._Patch):
 
         self.signals.pitch = self.plugins.mp.signals.input
         self.signals.trigger = self.plugins.env.signals.trigger
-        self.signals.output = self.plugins.filter.signals.output
 
+        self.signals.output = self.plugins.tone.signals.output
         self.signals.envelope_data = self.plugins.env.signals.env_output
 
     @staticmethod
@@ -615,25 +664,34 @@ class mix_env_filt(bl00mbox._patches._Patch):
 
     @staticmethod
     def get_dB_string(signal):
-        ret = int(signal.dB)
-        if ret >= -30:
-            return str(ret) + "dB"
-        else:
+        if signal.value == 0:
             return "mute"
+        return str(int(signal.dB)) + "dB"
 
     def make_mixer_page(self):
         page = ParameterPage("mixer")
-        for i in range(self._mixer_inputs):
+        mix_params = []
+        for x in range(2):
             param = Parameter(
-                [self.plugins.mixer.signals.input_gain[i]],
-                "chan " + str(i + 1),
-                0.818,
-                [-33, 0],
+                [self.plugins.mixer.signals.input_gain[x]],
+                "?",
+                0.5,
+                [0, 4096],
+                modulated=True,
             )
-            param.signal_get_value = self.get_dB_value
-            param.signal_set_value = self.set_dB_value
             param.signal_get_string = self.get_dB_string
-            page.params += [param]
+            # param.signal_get_value = self.get_dB_value
+            # param.signal_set_value = self.set_dB_value
+            mix_params += [param]
+        page.params += [mix_params[0]]
+        param = Parameter(
+            [self.plugins.tone.signals.cutoff], "cut", 0.5, [25000, 30000]
+        )
+        param.signal_get_string = self.get_cutoff_string
+        page.params += [param]
+        param = Parameter([self.plugins.thru.signals.input], "bend", 0.1)
+        page.params += [param]
+        page.params += [mix_params[1]]
         return page
 
     @staticmethod
@@ -721,6 +779,8 @@ class MelodicApp(Application):
         self.BLA = (0, 0, 0)
         self.savefile_dir = "/sd/mono_synth"
 
+        self.osc_types = [detune_osc, hard_sync_osc, dreamy_osc]
+
         self.synths = []
         self.base_scale = [0, 2, 3, 5, 7, 8, 10]
         self.mid_point_petal = 0
@@ -750,7 +810,6 @@ class MelodicApp(Application):
         self.env_value = 0
         self.lfo_value = 0
 
-        self.first_enter = True
         self.enter_done = False
 
         self._scale_setup_highlight = 0
@@ -792,6 +851,7 @@ class MelodicApp(Application):
     def draw(self, ctx):
         if self.blm is None:
             return
+        # ctx.font = "Arimo Bold"
         if not self.enter_done and not self.mode_main:
             self.pages[self.active_page].full_redraw = True
         self.env_value = self._signal_env.value / 4096
@@ -1029,80 +1089,71 @@ class MelodicApp(Application):
         ctx.move_to(3, 0)
         ctx.line_to(120, 0).stroke()
 
-    def _build_synth(self):
-        # doesn't work for other values atm
-        self.polyphony = 1
-        # max length 4, rest gets cropped
-        self.osc_targets = [detune_osc]
+    def _build_osc(self, osc_target, slot):
+        if self.blm is None:
+            return
+        if slot > len(self.osc_pages):
+            return
 
+        if osc_target is None:
+            if self.osc_pages[slot] is not None:
+                self.osc_pages[slot].delete()
+            self.osc_pages[slot] = None
+            self.mixer_page.params[slot].name = "/"
+        else:
+            if self.osc_pages[slot] is None:
+                pass
+            elif isinstance(self.osc_pages[slot], osc_target):
+                return
+            else:
+                self.osc_pages[slot].delete()
+            osc = self.blm.new(osc_target)
+            osc.signals.pitch = self.synth.signals.osc_pitch[slot]
+            osc.signals.output = self.synth.signals.osc_input[slot]
+            self.mixer_page.params[slot * 3].name = osc.name
+            page = osc.make_page()
+            page.finalize(self.blm, self._signal_lfo, [self._signal_env])
+            self.osc_pages[slot] = page
+
+        pages = []
+        pages += [self.scale_page] + [self.osc_page] + [self.mixer_page]
+        pages += [page for page in self.osc_pages if page is not None]
+        pages += self.synth_pages
+        self.pages = pages
+
+    def _build_synth(self):
         if self.blm is None:
             self.blm = bl00mbox.Channel("mono synth")
-        self.blm.volume = 13000
+            self.blm.volume = 13000
+            self.poly_squeeze = self.blm.new(bl00mbox.plugins.poly_squeeze, 1, 10)
 
-        self.mixer = self.blm.new(bl00mbox.plugins.mixer, self.polyphony)
-        self.filter = self.blm.new(bl00mbox.plugins.filter)
-        self.mixer.signals.output = self.filter.signals.input
-        self.filter.signals.cutoff.freq = 5000
-        self.filter.signals.output = self.blm.mixer
-        self.poly_squeeze = self.blm.new(
-            bl00mbox.plugins.poly_squeeze, self.polyphony, 10
-        )
+            self.synth = self.blm.new(mix_env_filt)
+            self.synth.signals.output = self.blm.mixer
+            self.synth.signals.trigger = self.poly_squeeze.signals.trigger_out[0]
+            self.synth.signals.pitch = self.poly_squeeze.signals.pitch_out[0]
 
-        self.synths = []
-        self.oscs = [[]] * self.polyphony
-        self.pages = []
-        self.osc_pages = []
+            self.lfo = self.blm.new(rand_lfo)
 
-        self.osc_targets = self.osc_targets[:4]
-        num_oscs = len(self.osc_targets)
-        for i in range(self.polyphony):
-            synth = self.blm.new(mix_env_filt, num_oscs)
-            synth.signals.output = self.mixer.signals.input[i]
-            synth.signals.trigger = self.poly_squeeze.signals.trigger_out[i]
-            synth.signals.pitch = self.poly_squeeze.signals.pitch_out[i]
-            self.synths += [synth]
+            self._signal_lfo = self.lfo.signals.output
+            self._signal_env = self.synth.plugins.env.signals.env_output
 
-        self.lfo = self.blm.new(rand_lfo)
+            self.mixer_page = self.synth.make_mixer_page()
 
-        self._signal_lfo = self.lfo.signals.output
-        self._signal_env = self.synths[0].plugins.env.signals.env_output
+            self.synth_pages = []
+            self.synth_pages += [self.synth.make_filter_page()]
+            self.synth_pages += [self.synth.make_env_page(toggle=self.drone_toggle)]
+            self.synth_pages += [self.lfo.make_page()]
 
-        mixer_page = self.synths[0].make_mixer_page()
-        mixer_page.params = mixer_page.params[:4]
-        draw_mixer = num_oscs > 1
+            self.osc_pages = [None, None]
 
-        self.pages += [mixer_page]
+            for page in self.synth_pages + [self.mixer_page]:
+                page.finalize(self.blm, self._signal_lfo, [self._signal_env])
 
-        for i in range(self.polyphony):
-            for j, osc_target in enumerate(self.osc_targets):
-                osc = self.blm.new(osc_target)
-                osc.signals.pitch = self.synths[i].signals.osc_pitch[j]
-                osc.signals.output = self.synths[i].signals.osc_input[j]
-                mixer_page.params[j].name = osc.name
-                make_page = getattr(osc, "make_page", None)
-                if make_page is not None:
-                    page = make_page()
-                    if not draw_mixer:
-                        page.display_name = "osc"
-                    self.pages += [page]
-                    self.osc_pages += [page]
-                self.oscs[i] += [osc]
+        self.scale_page = ScalePage("scale")
+        self.osc_page = OscPage("osc")
 
-        self.pages += [self.synths[0].make_filter_page()]
-        self.pages += [self.synths[0].make_env_page(toggle=self.drone_toggle)]
-        self.pages += [self.lfo.make_page()]
-
-        for page in self.pages:
-            page.finalize(
-                self.blm,
-                self._signal_lfo,
-                [self._signal_env],
-            )
-
-        if not draw_mixer:
-            self.pages.remove(mixer_page)
-
-        self.pages += [ScalePage("scale")]
+        self._build_osc(detune_osc, 0)
+        self._build_osc(dreamy_osc, 1)
 
     def update_leds(self, init=False):
         norm = self.env_value / 2 + 0.5
@@ -1133,10 +1184,6 @@ class MelodicApp(Application):
         self.enter_done = False
         if not self.mode_main:
             self.pages[self.active_page].full_redraw = True
-        if self.first_enter:
-            self.save_sound_settings("defaults.json")
-            self.save_notes_settings("defaults.json")
-            self.first_enter = False
         self.load_sound_settings("autosave.json")
         self.load_notes_settings("autosave.json")
 
@@ -1304,9 +1351,15 @@ class MelodicApp(Application):
 
     def get_sound_settings(self):
         sound_settings = {}
-        for page in self.pages:
-            if isinstance(Page, ParameterPage):
-                sound_settings[page.name] = page.get_settings()
+        for page in self.synth_pages + [self.mixer_page]:
+            sound_settings[page.name] = page.get_settings()
+        osc_settings = []
+        for page in self.osc_pages:
+            settings = {}
+            settings["params"] = page.get_settings()
+            settings["type"] = page.patch.name
+            osc_settings += [settings]
+        sound_settings["oscs"] = osc_settings
         return sound_settings
 
     def get_notes_settings(self):
@@ -1318,12 +1371,23 @@ class MelodicApp(Application):
         return notes_settings
 
     def set_sound_settings(self, settings):
-        for page in self.pages:
-            if isinstance(Page, ParameterPage):
-                if page.name in settings.keys():
-                    page.set_settings(settings[page.name])
-                else:
-                    print(f"no setting found for {page.name}")
+        for page in self.synth_pages + [self.mixer_page]:
+            if page.name in settings.keys():
+                page.set_settings(settings[page.name])
+            else:
+                print(f"no setting found for {page.name}")
+
+        if "oscs" in settings.keys():
+            for x, osc in enumerate(settings["oscs"]):
+                name = osc["type"]
+                for osc_t in self.osc_types:
+                    if osc_t.name == name:
+                        osc_type = osc_t
+                        break
+                self._build_osc(osc_type, x)
+                self.osc_pages[x].set_settings(osc["params"])
+        else:
+            print(f"no setting found for oscs")
 
     def set_notes_settings(self, settings):
         self.base_scale = settings["base scale"]
@@ -1353,7 +1417,6 @@ class MelodicApp(Application):
         if old_settings is not None:
             if dict_contains_dict(old_settings, settings):
                 return
-            settings = dict_absorb_dict(old_settings, settings)
         path = self.savefile_dir + "/sounds"
         try:
             fakemakedirs(path, exist_ok=True)
@@ -1363,6 +1426,14 @@ class MelodicApp(Application):
                 f.close()
         except OSError as e:
             print("could not save sound settings")
+
+    def delete_sound_settings(self, filename):
+        path = self.savefile_dir + "/sounds/" + filename
+        try:
+            os.remove(path)
+            return True
+        except OSError:
+            return False
 
     def load_notes_settings_file(self, filename):
         path = self.savefile_dir + "/notes/" + filename
@@ -1405,13 +1476,6 @@ class MelodicApp(Application):
 
 
 def dict_contains_dict(container, containee):
-    """
-    checks if all key-value pairs in containee are also
-    present in container while recursing over dict values
-    and returns true if so.
-    note that key-value pairs in container don't have to
-    be present in containee for a true return.
-    """
     for key in containee:
         if key not in container:
             return False
@@ -1422,25 +1486,6 @@ def dict_contains_dict(container, containee):
             # print(f"change in {key} from {container[key]} to {containee[key]}")
             return False
     return True
-
-
-def dict_absorb_dict(absorber, absorbee):
-    """
-    copies all recursive key-value pairs from absorbee
-    into absorber while keeping absorber as intact as
-    possible. returns absorber for chaining convenience,
-    but the argument is modified too.
-    """
-    for key in absorber:
-        if key in absorbee:
-            if isinstance(absorber[key], dict) and isinstance(absorbee[key], dict):
-                dict_absorb_dict(absorber[key], absorbee[key])
-            else:
-                absorber[key] = absorbee[key]
-    for key in absorbee:
-        if key not in absorber:
-            absorber[key] = absorbee[key]
-    return absorber
 
 
 class ScalePage(Page):
@@ -1700,6 +1745,308 @@ class ScalePage(Page):
                             dotsize,
                             2,
                         ).fill()
+
+            if highlight:
+                ctx.global_alpha = 1
+                if self._save_timer and self._load_timer:
+                    if load_possible:
+                        ctx.rgb(*app.BLA)
+                        ybar = (
+                            ysize
+                            * min(
+                                (self._save_timer + self._load_timer)
+                                / (2 * self.hold_time),
+                                1,
+                            )
+                            / 2
+                        )
+                        ctx.rectangle(
+                            center - xsize / 2, yoffset - ysize / 2, xsize, ybar
+                        ).fill()
+                        ctx.rectangle(
+                            center - xsize / 2, yoffset - ybar + ysize / 2, xsize, ybar
+                        ).fill()
+                        ctx.rgb(*app.CYA)
+                        ctx.line_width = 2
+                        ctx.move_to(
+                            center - xsize / 2, yoffset + ybar - ysize / 2
+                        ).rel_line_to(xsize, 0).stroke()
+                        ctx.move_to(
+                            center - xsize / 2, yoffset - ybar + ysize / 2
+                        ).rel_line_to(xsize, 0).stroke()
+                elif self._save_timer:
+                    ctx.rgb(*app.CYA)
+                    ybar = ysize * min(self._save_timer / self.hold_time, 1)
+                    ctx.rectangle(
+                        center - xsize / 2, yoffset - ybar + ysize / 2, xsize, ybar
+                    ).fill()
+            ctx.line_width = 3
+            ctx.rgb(*app.PUR)
+            ctx.round_rectangle(
+                center - 1 - xsize / 2, yoffset - 1 - ysize / 2, xsize + 2, ysize + 2, 5
+            ).stroke()
+
+        ctx.restore()
+
+        if self.full_redraw:
+            ctx.rgb(*app.BLA)
+            ctx.rectangle(-21, -66 - 16, 42, 18).fill()
+            ctx.rectangle(-21 - 63, -74 - 18, 42, 20).fill()
+
+            ctx.rgb(*app.YEL)
+
+            if load_possible:
+                ctx.global_alpha = 1
+            else:
+                ctx.global_alpha = 0.5
+            ctx.font_size = 14
+            ctx.move_to(0, -66)
+            ctx.text("delete")
+            ctx.font_size = 16
+            ctx.move_to(-63, -74)
+            ctx.text("load")
+
+            start_deg = 1.1 / 40
+            stop_deg = 1.65 / 40
+            ctx.arc(
+                0,
+                -130 - 100,
+                60 + 100,
+                math.tau * (0.25 + start_deg),
+                math.tau * (0.25 + stop_deg),
+                0,
+            ).stroke()
+            ctx.arc(
+                0,
+                -130 - 100,
+                60 + 100,
+                math.tau * (0.25 - stop_deg),
+                math.tau * (0.25 - start_deg),
+                0,
+            ).stroke()
+
+            ctx.global_alpha = 1
+
+            ctx.move_to(63, -74)
+            ctx.text("save")
+
+            # arrows
+            for sign in [-1, 1]:
+                ctx.move_to(100 * sign, 50)
+                ctx.rel_line_to(-6 * sign, -4)
+                ctx.rel_line_to(0, 8)
+                ctx.rel_line_to(6 * sign, -4)
+                ctx.stroke()
+
+            self.full_redraw = False
+
+
+class OscPage(Page):
+    def __init__(self, name="sound"):
+        super().__init__(name)
+        self.num_slots = 5
+        self.hold_time = 1500
+
+        self._slot = 0
+        self._slot_oscs = [None] * self.num_slots
+        self._save_timer = 0
+        self._load_timer = 0
+        self._load_files_request = True
+        self._osc_type = [0, 0]
+
+    def slotpath(self, num=None):
+        if num is None:
+            num = self._slot
+        return "slot" + str(num + 1) + ".json"
+
+    def think(self, ins, delta_ms, app):
+        self.subwindow %= 2
+        if self.subwindow == 0:
+            self.think_osc_setup(ins, delta_ms, app)
+        elif self.subwindow == 1:
+            self.think_osc_saveload(ins, delta_ms, app)
+
+    def draw(self, ctx, app):
+        if self.full_redraw:
+            ctx.rgb(0, 0, 0).rectangle(-120, -120, 240, 240).fill()
+            app.draw_title(ctx, self.display_name)
+        if self.subwindow == 0:
+            self.draw_osc_setup(ctx, app)
+        elif self.subwindow == 1:
+            self.draw_osc_saveload(ctx, app)
+
+    def think_osc_setup(self, ins, delta_ms, app):
+        for i in range(2):
+            if app.osc_pages[i] is not None:
+                if app.osc_types[self._osc_type[i]] != type(app.osc_pages[i].patch):
+                    self._osc_type[i] = app.osc_types.index(
+                        type(app.osc_pages[i].patch)
+                    )
+        for osc, petal, plusminus in [[0, 7, 1], [0, 9, -1], [1, 3, 1], [1, 1, -1]]:
+            if app.input.captouch.petals[petal].whole.pressed:
+                self._osc_type[osc] = (self._osc_type[osc] + plusminus) % len(
+                    app.osc_types
+                )
+                app._build_osc(app.osc_types[self._osc_type[osc]], osc)
+
+    def draw_osc_setup(self, ctx, app):
+        app.draw_modulator_indicator(ctx, "osc type", col=app.PUR)
+        ctx.text_align = ctx.CENTER
+        ctx.font = "Arimo Bold"
+
+        for k in range(2):
+            ctx.save()
+            x = (k * 2 - 1) * 65
+            y = -5
+            rot = (1 - k * 2) * 0.5 * math.tau / 60
+            ctx.translate(x, y)
+            ctx.rotate(rot)
+            ctx.translate(-x, -y)
+            for i in range(3):
+                j = (self._osc_type[k] + i - 1) % len(app.osc_types)
+                rot = (1 - k * 2) * (1 - i) * math.tau / 60
+                x = (k * 2 - 1) * 67
+                y = i * 40 - 52
+                ctx.font_size = 20
+                xsize = 80
+                ysize = 30
+                ctx.save()
+                if i != 1:
+                    ctx.font_size *= 0.8
+                    xsize *= 0.8
+                    ysize *= 0.8
+                    x *= 0.67
+                    ctx.global_alpha *= 0.8
+                ctx.translate(x, y)
+                ctx.rotate(rot)
+                ctx.translate(-x, -y)
+                ctx.line_width = 3
+                ctx.rgb(*app.PUR)
+                ctx.round_rectangle(
+                    x - xsize / 2, y - 5 - ysize / 2, xsize, ysize, 5
+                ).stroke()
+                ctx.rgb(*app.CYA)
+                ctx.move_to(x, y)
+                ctx.text(app.osc_types[j].name)
+                ctx.restore()
+            ctx.restore()
+
+        ctx.rgb(*app.YEL)
+
+        # arrows
+        for sign in [-1, 1]:
+            ctx.move_to(100 * sign, 50)
+            ctx.rel_line_to(-4, -6)
+            ctx.rel_line_to(8, 0)
+            ctx.rel_line_to(-4, 6)
+            ctx.stroke()
+
+            ctx.move_to(70 * sign, -93)
+            ctx.rel_line_to(-4, 6)
+            ctx.rel_line_to(8, 0)
+            ctx.rel_line_to(-4, -6)
+            ctx.stroke()
+
+    def think_osc_saveload(self, ins, delta_ms, app):
+        if app.input.captouch.petals[7].whole.pressed:
+            self._slot = (self._slot - 1) % self.num_slots
+            self.full_redraw = True
+        if app.input.captouch.petals[3].whole.pressed:
+            self._slot = (self._slot + 1) % self.num_slots
+            self.full_redraw = True
+
+        if ins.captouch.petals[1].pressed:
+            if self._save_timer < self.hold_time:
+                self._save_timer += delta_ms
+                if self._save_timer >= self.hold_time and not self._load_timer:
+                    print("saving slot " + str(self._slot + 1))
+                    app.save_sound_settings(self.slotpath())
+                    self._load_files_request = True
+        else:
+            self._save_timer = 0
+
+        if ins.captouch.petals[9].pressed:
+            if self._load_timer < self.hold_time:
+                self._load_timer += delta_ms
+                if self._load_timer >= self.hold_time and not self._save_timer:
+                    if self._slot_oscs[self._slot] is not None:
+                        print("loading slot " + str(self._slot + 1))
+                        app.load_sound_settings(self.slotpath())
+        else:
+            self._load_timer = 0
+
+        if (self._load_timer + self._save_timer) >= (2 * self.hold_time):
+            if self._load_timer < 33333 and (self._slot_oscs[self._slot] is not None):
+                print("deleting slot " + str(self._slot + 1))
+                app.delete_sound_settings(self.slotpath())
+                self._load_timer = 33333
+                self._load_files_request = True
+
+        if self._load_files_request:
+            self.load_files(app)
+            self._load_files_request = False
+
+    def load_files(self, app):
+        for i in range(self.num_slots):
+            settings = app.load_sound_settings_file(self.slotpath(i))
+            if settings is None:
+                self._slot_oscs[i] = None
+            else:
+                self._slot_oscs[i] = "dummy"
+        self.full_redraw = True
+
+    def draw_osc_saveload(self, ctx, app):
+        if self.full_redraw:
+            app.draw_modulator_indicator(ctx, "save/load", col=app.YEL)
+        ctx.text_align = ctx.CENTER
+        ctx.font = "Arimo Bold"
+        ctx.save()
+        load_possible = False
+        for i in range(3):
+            ctx.line_width = 3
+            j = i
+            if self._slot > (self.num_slots - 2):
+                j += self._slot - 2
+            elif self._slot > 1:
+                j += self._slot - 1
+            highlight = self._slot == j
+            if (not highlight) and (not self.full_redraw):
+                continue
+
+            xsize = 60
+            ysize = 80
+            center = (i - 1) * 70
+            yoffset = -10
+            ctx.rgb(*app.BLA)
+            ctx.rectangle(
+                center - 3 - xsize / 2, yoffset - 3 - ysize / 2, xsize + 6, ysize + 6
+            ).fill()
+
+            ctx.global_alpha = 0.5
+            ctx.font_size = 20
+            ctx.rgb(*app.PUR)
+
+            if highlight:
+                if self._slot_oscs[j] is not None:
+                    load_possible = True
+                ctx.global_alpha = 1
+                if self._save_timer:
+                    pass
+                elif self._load_timer and load_possible:
+                    ybar = ysize * min(self._load_timer / self.hold_time, 1)
+                    ctx.rectangle(
+                        center - xsize / 2, yoffset - ybar + ysize / 2, xsize, ybar
+                    ).fill()
+
+            ctx.rgb(*app.CYA)
+            if self._slot_oscs[j] is None:
+                ctx.move_to(center, yoffset + 5)
+                ctx.text(self.slotpath(j).split(".")[0])
+            else:
+                ctx.move_to(center, yoffset - ysize / 4 + 5)
+                ctx.text(self.slotpath(j).split(".")[0])
+                ctx.move_to(center, yoffset + ysize / 4 + 5)
+                ctx.text(self._slot_oscs[j])
 
             if highlight:
                 ctx.global_alpha = 1
