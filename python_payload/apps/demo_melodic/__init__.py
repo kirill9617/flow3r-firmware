@@ -121,7 +121,7 @@ class ParameterPage(Page):
                     ctx,
                     app.petal_index[i],
                     [val, param.mod_norms[0]],
-                    param.name,
+                    param.display_name,
                     param.unit,
                     sub=self.subwindow,
                     plusminus=plusminus,
@@ -140,7 +140,7 @@ class ParameterPage(Page):
                         ctx,
                         app.petal_index[i],
                         param.norm,
-                        param.name,
+                        param.display_name,
                         param.unit,
                         skip_redraw=redraw,
                     )
@@ -215,6 +215,7 @@ class Parameter:
         self._mod_mixers = []
         self._mod_shifters = []
         self.name = name
+        self.display_name = name
         self.modulated = modulated
         self.finalized = False
         self.default_env_mod = 0.5
@@ -376,8 +377,8 @@ class Parameter:
                 self.env_norm = 0.5
 
 
-class dreamy_osc(bl00mbox.Patch):
-    name = "dream"
+class sines_osc(bl00mbox.Patch):
+    name = "sines"
 
     def __init__(self, chan):
         super().__init__(chan)
@@ -389,7 +390,7 @@ class dreamy_osc(bl00mbox.Patch):
         self.plugins.mp.signals.thru = self.plugins.oscs[0].signals.pitch
         for x in range(3):
             self.plugins.mp.signals.output[x] = self.plugins.oscs[x + 1].signals.pitch
-            self.plugins.mp.signals.shift[x].tone = [12, 19, 28][x]
+            self.plugins.mp.signals.shift[x].tone = [12, 19.02, 27.863][x]
         for x in range(4):
             self.plugins.oscs[x].signals.waveform.switch.SINE = True
             self.plugins.oscs[x].signals.output = self.plugins.mixer.signals.input[x]
@@ -406,67 +407,166 @@ class dreamy_osc(bl00mbox.Patch):
                 [self.plugins.mixer.signals.input_gain[x]],
                 names[x],
                 0.5,
+                [0, 32767],
                 modulated=True,
             )
             page.params += [param]
         return page
 
 
-class hard_sync_osc(bl00mbox.Patch):
-    name = "edge"
+class dream_osc(bl00mbox.Patch):
+    name = "dream"
 
     def __init__(self, chan):
         super().__init__(chan)
 
-        self.plugins.root_osc = self._channel.new(bl00mbox.plugins.osc)
-        self.plugins.mod_osc = self._channel.new(bl00mbox.plugins.osc)
-        self.plugins.main_osc = self._channel.new(bl00mbox.plugins.osc)
-        self.plugins.root_osc.signals.sync_output = (
-            self.plugins.mod_osc.signals.sync_input
-        )
-        self.plugins.mod_osc.signals.sync_output = (
-            self.plugins.main_osc.signals.sync_input
-        )
+        self.plugins.osc = self._channel.new(bl00mbox.plugins.osc)
+        self.plugins.mixers = [
+            self._channel.new(bl00mbox.plugins.mixer, 1) for _ in range(2)
+        ]
+        self.plugins.dists = [
+            self._channel.new(bl00mbox.plugins.distortion) for _ in range(2)
+        ]
+        self.plugins.mix_ranges = [
+            self._channel.new(bl00mbox.plugins.range_shifter) for _ in range(2)
+        ]
+        self.plugins.out_mixer = self._channel.new(bl00mbox.plugins.mixer, 2)
+        self.plugins.osc.signals.waveform.switch.SINE = True
 
-        self.plugins.mp = self._channel.new(bl00mbox.plugins.multipitch, 2)
-        self.plugins.mp.signals.thru = self.plugins.root_osc.signals.pitch
-        self.plugins.mp.signals.output[0] = self.plugins.mod_osc.signals.pitch
-        self.plugins.mp.signals.output[1] = self.plugins.main_osc.signals.pitch
+        for i in range(2):
+            self.plugins.dists[i].signals.input = self.plugins.mixers[i].signals.output
+            self.plugins.osc.signals.output = self.plugins.mixers[i].signals.input[0]
+            self.plugins.dists[i].signals.output = self.plugins.out_mixer.signals.input[
+                i
+            ]
+            self.plugins.mix_ranges[
+                i
+            ].signals.output = self.plugins.out_mixer.signals.input_gain[i]
+            self.plugins.mix_ranges[i].signals.output_range[1] = 0
+            self.plugins.mix_ranges[i].signals.output_range[0] = 8192
 
-        self.plugins.main_osc.signals.waveform.switch.SINE = True
+        self.plugins.dists[0].curve = [
+            32767 * math.sin((math.tau * 5) * (0.1 + (x / 128) ** 2))
+            for x in range(129)
+        ]
+        self.plugins.dists[1].curve = [
+            32767 * math.sin((math.tau * 5) * (0.225 + (x / 128) ** 3))
+            for x in range(129)
+        ]
+        self.plugins.mix_ranges[1].signals.input_range[0] = 0
+        self.plugins.mix_ranges[1].signals.input_range[1] = 8192
+        self.plugins.mix_ranges[1].signals.input = self.plugins.mix_ranges[
+            0
+        ].signals.output
 
-        self.signals.pitch = self.plugins.mp.signals.input
-        self.signals.output = self.plugins.main_osc.signals.output
+        self.signals.pitch = self.plugins.osc.signals.pitch
+        self.signals.output = self.plugins.out_mixer.signals.output
 
     def make_page(self):
         page = ParameterPage(self.name, self)
         param = Parameter(
-            [self.plugins.mp.signals.shift[1]],
-            "focus",
-            0.2,
-            [18367, 18367 + 2400 * 2],
+            [self.plugins.mixers[0].signals.input_gain[0]],
+            "shine",
+            0.5,
+            [4096 * 0.2, 4096],
             modulated=True,
         )
         page.params += [param]
         param = Parameter(
-            [self.plugins.mp.signals.shift[0]],
-            "disrupt",
-            0,
-            [18367, 18367 + 2400 * 2],
+            [self.plugins.mix_ranges[0].signals.input],
+            "mix",
+            0.5,
             modulated=True,
         )
         page.params += [param]
         param = Parameter(
-            [self.plugins.main_osc.signals.waveform],
-            "wave",
-            0.33,
+            [self.plugins.mixers[1].signals.input_gain[0]],
+            "shimmer",
+            0.5,
+            [4096 * 0.2, 4096],
             modulated=True,
         )
         page.params += [param]
         return page
 
 
-class detune_osc(bl00mbox.Patch):
+class beep_osc(bl00mbox.Patch):
+    name = "beep"
+
+    def __init__(self, chan):
+        super().__init__(chan)
+
+        voices = 3
+
+        self.plugins.detune_osc = self._channel.new(bl00mbox.plugins.osc)
+        self.plugins.detune_osc.signals.waveform.switch.SAW = True
+
+        self.plugins.oscs = [
+            self._channel.new(bl00mbox.plugins.osc) for i in range(voices)
+        ]
+        self.plugins.sync_osc = self._channel.new(bl00mbox.plugins.osc)
+        self.plugins.mps = [
+            self._channel.new(bl00mbox.plugins.multipitch, 1) for i in range(voices)
+        ]
+        self.plugins.mixer = self._channel.new(bl00mbox.plugins.mixer, voices)
+        self.plugins.shift_range = self._channel.new(bl00mbox.plugins.range_shifter)
+
+        self.plugins.sync_osc.signals.pitch = self.plugins.mps[0].signals.thru
+
+        for i in range(voices):
+            self.plugins.oscs[
+                i
+            ].signals.sync_input_phase = self.plugins.detune_osc.signals.output
+            self.plugins.oscs[i].signals.waveform.switch.SQUARE = True
+            self.plugins.oscs[i].signals.pitch = self.plugins.mps[i].signals.output[0]
+            self.plugins.oscs[
+                i
+            ].signals.sync_input = self.plugins.sync_osc.signals.sync_output
+            self.plugins.oscs[i].signals.output = self.plugins.mixer.signals.input[i]
+            self.plugins.shift_range.signals.output = self.plugins.mps[i].signals.shift[
+                0
+            ]
+            if i:
+                self.plugins.mps[i].signals.input = self.plugins.mps[
+                    i - 1
+                ].signals.output[0]
+
+        self.plugins.shift_range.signals.output_range[0] = 18367 + (666 / voices)
+        self.plugins.shift_range.signals.output_range[1] = 18367 + (6666 / voices)
+
+        self.signals.pitch = self.plugins.mps[0].signals.input
+        self.signals.output = self.plugins.mixer.signals.output
+
+    def make_page(self):
+        page = ParameterPage(self.name, self)
+        voices = len(self.plugins.oscs)
+        param = Parameter(
+            [self.plugins.shift_range.signals.input],
+            "shift",
+            0.2,
+            modulated=True,
+        )
+        page.params += [param]
+        param = Parameter(
+            [self.plugins.mixer.signals.gain],
+            "dist",
+            0,
+            [4096 / voices, 4096],
+            modulated=True,
+        )
+        page.params += [param]
+        param = Parameter(
+            [self.plugins.detune_osc.signals.pitch],
+            "detune",
+            0.2,
+            [-9000, 0],
+            modulated=True,
+        )
+        page.params += [param]
+        return page
+
+
+class acid_osc(bl00mbox.Patch):
     name = "acid"
 
     def __init__(self, chan):
@@ -627,6 +727,16 @@ class mix_env_filt(bl00mbox.Patch):
         self.plugins.mixer = self._channel.new(bl00mbox.plugins.mixer, 2)
         self.plugins.thru = self._channel.new(bl00mbox.plugins.range_shifter)
         self.plugins.thru.always_render = True
+        self.plugins.mixer.signals.gain.mult = 1 / 16
+        self.plugins.gain_curves = [
+            self._channel.new(bl00mbox.plugins.distortion) for x in range(2)
+        ]
+        for x in range(2):
+            self.plugins.gain_curves[x].always_render = True
+            self.plugins.gain_curves[x].curve_set_power(0.25)
+            self.plugins.gain_curves[
+                x
+            ].signals.output = self.plugins.mixer.signals.input_gain[x]
 
         self.plugins.env = self._channel.new(bl00mbox.plugins.env_adsr)
         self.plugins.env.signals.input = self.plugins.mixer.signals.output
@@ -634,8 +744,12 @@ class mix_env_filt(bl00mbox.Patch):
         self.plugins.filter = self._channel.new(bl00mbox.plugins.filter)
         self.plugins.filter.signals.input = self.plugins.env.signals.output
 
+        self.plugins.dist = self._channel.new(bl00mbox.plugins.distortion)
+        self.plugins.dist.curve_set_power(3)
+        self.plugins.dist.signals.input = self.plugins.filter.signals.output
+
         self.plugins.tone = self._channel.new(bl00mbox.plugins.filter)
-        self.plugins.tone.signals.input = self.plugins.filter.signals.output
+        self.plugins.tone.signals.input = self.plugins.dist.signals.output
 
         self.signals.osc_input = self.plugins.mixer.signals.input
         self.signals.osc_pitch = self.plugins.mp.signals.output
@@ -673,19 +787,20 @@ class mix_env_filt(bl00mbox.Patch):
         mix_params = []
         for x in range(2):
             param = Parameter(
-                [self.plugins.mixer.signals.input_gain[x]],
-                "?",
+                [self.plugins.gain_curves[x].signals.input],
+                "osc" + str(x),
                 0.5,
-                [0, 4096],
+                [0, 32767],
                 modulated=True,
             )
             param.signal_get_string = self.get_dB_string
             # param.signal_get_value = self.get_dB_value
             # param.signal_set_value = self.set_dB_value
+            param.set_unit_signal(self.plugins.mixer.signals.input_gain[x])
             mix_params += [param]
         page.params += [mix_params[0]]
         param = Parameter(
-            [self.plugins.tone.signals.cutoff], "cut", 0.5, [25000, 30000]
+            [self.plugins.tone.signals.cutoff], "hicut", 0.5, [23000, 29000]
         )
         param.signal_get_string = self.get_cutoff_string
         page.params += [param]
@@ -753,7 +868,7 @@ class mix_env_filt(bl00mbox.Patch):
         page.params += [param]
         param = Parameter(
             [self.plugins.filter.signals.reso],
-            "reso",
+            "q",
             0.27,
             [2048, 4096 * 7.5],
         )
@@ -779,7 +894,7 @@ class MelodicApp(Application):
         self.BLA = (0, 0, 0)
         self.savefile_dir = "/sd/mono_synth"
 
-        self.osc_types = [detune_osc, hard_sync_osc, dreamy_osc]
+        self.osc_types = [acid_osc, beep_osc, sines_osc, dream_osc]
 
         self.synths = []
         self.base_scale = [0, 2, 3, 5, 7, 8, 10]
@@ -1110,7 +1225,7 @@ class MelodicApp(Application):
             osc = self.blm.new(osc_target)
             osc.signals.pitch = self.synth.signals.osc_pitch[slot]
             osc.signals.output = self.synth.signals.osc_input[slot]
-            self.mixer_page.params[slot * 3].name = osc.name
+            self.mixer_page.params[slot * 3].display_name = osc.name
             page = osc.make_page()
             page.finalize(self.blm, self._signal_lfo, [self._signal_env])
             self.osc_pages[slot] = page
@@ -1120,6 +1235,7 @@ class MelodicApp(Application):
         pages += [page for page in self.osc_pages if page is not None]
         pages += self.synth_pages
         self.pages = pages
+        print(self.blm)
 
     def _build_synth(self):
         if self.blm is None:
@@ -1152,8 +1268,8 @@ class MelodicApp(Application):
         self.scale_page = ScalePage("scale")
         self.osc_page = OscPage("osc")
 
-        self._build_osc(detune_osc, 0)
-        self._build_osc(dreamy_osc, 1)
+        self._build_osc(acid_osc, 0)
+        self._build_osc(dream_osc, 1)
 
     def update_leds(self, init=False):
         norm = self.env_value / 2 + 0.5
@@ -1380,14 +1496,18 @@ class MelodicApp(Application):
         if "oscs" in settings.keys():
             for x, osc in enumerate(settings["oscs"]):
                 name = osc["type"]
+                osc_type = None
                 for osc_t in self.osc_types:
                     if osc_t.name == name:
                         osc_type = osc_t
                         break
-                self._build_osc(osc_type, x)
-                self.osc_pages[x].set_settings(osc["params"])
+                if osc_type is not None:
+                    self._build_osc(osc_type, x)
+                    self.osc_pages[x].set_settings(osc["params"])
+                else:
+                    print(f"couldn't find osc type {name}")
         else:
-            print(f"no setting found for oscs")
+            print("no setting found for oscs")
 
     def set_notes_settings(self, settings):
         self.base_scale = settings["base scale"]
