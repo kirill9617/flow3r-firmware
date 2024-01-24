@@ -335,8 +335,10 @@ class Parameter:
             if intval != self._lfo_thou:
                 self.lfo_norm_changed = True
                 self._lfo_thou = intval
+            val = 2 * val - 1
+            val = val * abs(val) * 32767
             for m in self._mod_mixers:
-                m.signals.input_gain[1].value = val * 65534 - 32767
+                m.signals.input_gain[1].value = val
 
     @property
     def env_norm(self):
@@ -349,8 +351,10 @@ class Parameter:
             if intval != self._env_thou:
                 self.env_norm_changed = True
                 self._env_thou = intval
+            val = 2 * val - 1
+            val = val * abs(val) * 32767
             for m in self._mod_mixers:
-                m.signals.input_gain[2].value = val * 65534 - 32767
+                m.signals.input_gain[2].value = val
 
     def get_settings(self):
         if not self.finalized:
@@ -375,6 +379,77 @@ class Parameter:
                 self.env_norm = settings["env"] / 1000
             else:
                 self.env_norm = 0.5
+
+
+class fm_osc(bl00mbox.Patch):
+    name = "fm"
+
+    def __init__(self, chan):
+        super().__init__(chan)
+
+        self.max_mult = 10
+        self.pitches = [12 * math.log(1 + x, 2) for x in range(self.max_mult)]
+
+        self.plugins.oscs = [self._channel.new(bl00mbox.plugins.osc) for x in range(3)]
+        self.plugins.mixers = [
+            self._channel.new(bl00mbox.plugins.mixer, 1) for x in range(2)
+        ]
+        self.plugins.mp = self._channel.new(bl00mbox.plugins.multipitch, 4)
+
+        self.plugins.mp.signals.thru = self.plugins.oscs[0].signals.pitch
+        for x in range(2):
+            self.plugins.mp.signals.output[x] = self.plugins.oscs[x + 1].signals.pitch
+            # self.plugins.oscs[0].signals.sync_output = self.plugins.oscs[x + 1].signals.sync_input
+
+        self.plugins.oscs[0].signals.fm = self.plugins.mixers[0].signals.output
+        self.plugins.oscs[1].signals.fm = self.plugins.mixers[1].signals.output
+        self.plugins.mixers[0].signals.input[0] = self.plugins.oscs[1].signals.output
+        self.plugins.mixers[1].signals.input[0] = self.plugins.oscs[2].signals.output
+
+        for x in range(2):
+            self.plugins.oscs[x].signals.waveform.switch.TRI = True
+
+        self.signals.pitch = self.plugins.mp.signals.input
+        self.signals.output = self.plugins.oscs[0].signals.output
+
+    def set_pitch_value(self, signal, val):
+        val = round(val / 100)
+        val = int(val - 1) % len(self.pitches)
+        signal.tone = self.pitches[val]
+
+    def get_pitch_value(self, signal):
+        return round(2 ** (signal.tone / 12)) * 100 / self.max_mult
+
+    @staticmethod
+    def get_pitch_string(signal):
+        return "x" + str(round(2 ** (signal.tone / 12)))
+
+    def make_page(self):
+        page = ParameterPage(self.name, self)
+        dparams = []
+        sparams = []
+        for i in range(2):
+            suffix = [" A", " B"][i]
+            param = Parameter(
+                [self.plugins.mixers[i].signals.input_gain[0]],
+                "depth" + suffix,
+                0.5,
+                [0, 4096],
+                modulated=True,
+            )
+            dparams += [param]
+            param = Parameter(
+                [self.plugins.mp.signals.shift[i]],
+                "shift" + suffix,
+                0.5,
+                [100, self.max_mult * 100],
+            )
+            param.signal_get_value = self.get_pitch_value
+            param.signal_get_string = self.get_pitch_string
+            param.signal_set_value = self.set_pitch_value
+            sparams += [param]
+        page.params += [dparams[0]] + sparams + [dparams[1]]
+        return page
 
 
 class sines_osc(bl00mbox.Patch):
@@ -894,7 +969,7 @@ class MelodicApp(Application):
         self.BLA = (0, 0, 0)
         self.savefile_dir = "/sd/mono_synth"
 
-        self.osc_types = [acid_osc, beep_osc, sines_osc, dream_osc]
+        self.osc_types = [acid_osc, beep_osc, sines_osc, dream_osc, fm_osc]
 
         self.synths = []
         self.base_scale = [0, 2, 3, 5, 7, 8, 10]
@@ -1377,8 +1452,9 @@ class MelodicApp(Application):
             self.mode_main = not self.mode_main
             if not self.mode_main:
                 self.pages[self.active_page].full_redraw = True
-                for i in range(1, 10, 2):
-                    self.poly_squeeze.signals.trigger_in[i].stop()
+                if not self.drone_toggle.value:
+                    for i in range(1, 10, 2):
+                        self.poly_squeeze.signals.trigger_in[i].stop()
         elif self.input.buttons.app.right.pressed:
             if self.mode_main:
                 self.shift_playing_field_by_num_petals(4)
@@ -1431,7 +1507,7 @@ class MelodicApp(Application):
         for petal in [7, 9, 1, 3]:
             petal_len = len(self.petal_val[petal])
             if ins.captouch.petals[petal].pressed:
-                val = (ins.captouch.petals[petal].position[0] + 12000) / 34000
+                val = (ins.captouch.petals[petal].position[0] + 15000) / 34000
                 val = max(0, min(1, val))
                 if self.petal_val[petal][0] is None:
                     for i in range(petal_len):
@@ -1456,7 +1532,7 @@ class MelodicApp(Application):
         self.pages[self.active_page].think(ins, delta_ms, self)
 
     @staticmethod
-    def center_notch(val, deadzone=0.1):
+    def center_notch(val, deadzone=0.2):
         refval = (2 * val) - 1
         gain = 1 / (1 - deadzone)
         if refval < -deadzone:
