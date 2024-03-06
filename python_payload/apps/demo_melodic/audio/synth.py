@@ -6,7 +6,6 @@ from ..ui.pages.synth import *
 class rand_lfo(bl00mbox.Patch):
     def __init__(self, chan):
         super().__init__(chan)
-        self.name = "mod lfo"
 
         self.plugins.osc = self._channel.new(bl00mbox.plugins.osc)
         self.plugins.range = self._channel.new(bl00mbox.plugins.range_shifter)
@@ -44,22 +43,17 @@ class rand_lfo(bl00mbox.Patch):
         val = signal.freq
         return f"{val:.2f}Hz"
 
-    def make_page(self):
-        page = ParameterPage(self.name, self)
-        param = Parameter(
-            [self.plugins.osc.signals.waveform], "wave", 0.33, modulated=True
-        )
+    def make_page(self, name = "lfo"):
+        page = ParameterPage(name, self)
+        param = Parameter([self.plugins.osc.signals.waveform], "wave", 0.33)
         page.params += [param]
-        param = Parameter(
-            [self.plugins.osc.signals.morph], "morph", 0.50, modulated=True
-        )
+        param = Parameter([self.plugins.osc.signals.morph], "morph", 0.50)
         page.params += [param]
         param = Parameter(
             [self.plugins.noise_vol.signals.input_gain[0]],
             "rng",
             0.41,
             [0, 768],
-            modulated=True,
         )
         page.params += [param]
         param = Parameter(
@@ -67,13 +61,53 @@ class rand_lfo(bl00mbox.Patch):
             "speed",
             0.65,
             [-10000, 6000],
-            modulated=True,
         )
         param.signal_get_string = rand_lfo.get_speed_string
         page.params += [param]
         page.scope_param = Parameter([self.signals.output], "", None, [-2048, 2048])
         return page
 
+class sensors(bl00mbox.Patch):
+    def __init__(self, chan):
+        super().__init__(chan)
+        self.plugins.mixer = self._channel.new(bl00mbox.plugins.mixer, 3)
+        self.plugins.mixer.signals.gain.dB = 0
+        self.plugins.mixer.signals.input[2] = -2048
+        self.plugins.mixer.always_render = True
+        self.signals.output = self.plugins.mixer.signals.output
+
+    def make_page(self, name = "sensors"):
+        page = ParameterPage(name, self)
+        param = Parameter([self.plugins.mixer.signals.input_gain[0]], "tilt", 0.5, [-4096, 4096])
+        page.params += [param]
+        param = Parameter([self.plugins.mixer.signals.input_gain[1]], "speed", 0.5, [-4096, 4096])
+        page.params += [param]
+        page.scope_param = Parameter([self.signals.output], "", None, [-2048, 2048])
+        return page
+
+    def update_data(self, acc_vector):
+        def inclination(vec):
+            x, y, z = vec[0], vec[1], vec[2]
+            if z > 0:
+                return math.atan((((x**2) + (y**2)) ** 0.5) / z)
+            elif z < 0:
+                return math.tau / 2 + math.atan((((x**2) + (y**2)) ** 0.5) / z)
+            return math.tau / 4
+        def azimuth(vec):
+            x, y, z = vec[0], vec[1], vec[2]
+            if x > 0:
+                return math.atan(y / x)
+            elif x < 0:
+                if y < 0:
+                    return math.atan(y / x) - math.tau / 2
+                else:
+                    return math.atan(y / x) + math.tau / 2
+            elif y < 0:
+                return -math.tau / 4
+            return math.tau / 4
+        self.plugins.mixer.signals.input[0] = inclination(acc_vector) * 4096 * 2
+        r = math.sqrt(sum([x*x for x in acc_vector]))
+        self.plugins.mixer.signals.input[1] = (r - 9.81) * 256
 
 class env(bl00mbox.Patch):
     def __init__(self, chan):
@@ -158,7 +192,7 @@ class mix_env_filt(bl00mbox.Patch):
         self.signals.envelope_data = self.plugins.env.signals.envelope_data
 
     def make_env_page(self, toggle=None):
-        return self.plugins.env.make_page(toggle, name="vol env")
+        return self.plugins.env.make_page(toggle, name="env")
 
     @staticmethod
     def set_dB_value(signal, val):

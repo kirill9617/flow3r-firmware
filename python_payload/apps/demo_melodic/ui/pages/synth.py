@@ -15,6 +15,8 @@ class ParameterPage(Page):
     def __init__(self, name, patch=None):
         super().__init__(name)
         self.patch = patch
+        self.mod_source = 0
+        self.num_mod_sources = 2
 
     def delete(self):
         self.patch.delete()
@@ -56,10 +58,10 @@ class ParameterPage(Page):
                 if param.modulated:
                     if self.subwindow == 0:
                         param.norm = val
-                    if self.subwindow == 1:
+                    elif self.mod_source == 0:
                         param.env_norm = center_notch(val)
-                    if self.subwindow == 2:
-                        param.lfo_norm = center_notch(val)
+                    elif self.mod_source == 1:
+                            param.lfo_norm = center_notch(val)
                 else:
                     param.norm = val
         if self.toggle is not None:
@@ -67,14 +69,26 @@ class ParameterPage(Page):
                 self.subwindow = 0
                 self.toggle.value = not self.toggle.value
         elif modulated:
-            self.subwindow %= 3
+            self.subwindow %= 2
         else:
             self.subwindow %= 1
+        self.locked = bool(self.subwindow)
+        if self.locked:
+            lr_dir = app.input.buttons.app.right.pressed - app.input.buttons.app.left.pressed
+            if lr_dir:
+                self.full_redraw = True
+                self.mod_source = (self.mod_source + lr_dir) % self.num_mod_sources
 
     def draw(self, ctx, app):
+        # changed encoding a bit but didn't follow thru yet, will clean that up
+        fakesubwindow = 0
+        if self.subwindow:
+            fakesubwindow = self.mod_source + 1
+
         if self.full_redraw:
             ctx.rgb(*app.cols.bg).rectangle(-120, -120, 240, 240).fill()
-            app.draw_title(ctx, self.display_name)
+            if not self.hide_header:
+                app.draw_title(ctx, self.display_name)
         modulated = False
         for i, param in enumerate(self.params):
             if param.modulated:
@@ -87,12 +101,12 @@ class ParameterPage(Page):
                     if param.norm_changed:
                         param.norm_changed = False
                         redraw = 1
-                elif self.subwindow == 1:
+                elif self.mod_source == 0:
                     val = param.env_norm
                     if param.env_norm_changed:
                         param.env_norm_changed = False
                         redraw = 1
-                elif self.subwindow == 2:
+                elif self.mod_source == 1:
                     val = param.lfo_norm
                     if param.lfo_norm_changed:
                         param.lfo_norm_changed = False
@@ -105,7 +119,7 @@ class ParameterPage(Page):
                     [val, param.mod_norms[0]],
                     param.display_name,
                     param.unit,
-                    sub=self.subwindow,
+                    sub=fakesubwindow,
                     plusminus=plusminus,
                     skip_redraw=redraw,
                 )
@@ -128,8 +142,10 @@ class ParameterPage(Page):
                     )
         if self.scope_param is not None:
             app.draw_scope(ctx, self.scope_param)
-        if modulated:
-            app.draw_modulator_indicator(ctx, sub=self.subwindow)
+        if self.hide_footer:
+            pass
+        elif modulated:
+            app.draw_modulator_indicator(ctx, sub=fakesubwindow)
         elif self.toggle is not None:
             if self.toggle.full_redraw or self.full_redraw:
                 if self.toggle.value:

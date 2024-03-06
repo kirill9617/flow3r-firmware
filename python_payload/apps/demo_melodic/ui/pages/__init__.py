@@ -12,6 +12,10 @@ class Page:
         self.subwindow = 0
         self.finalized = False
         self.full_redraw = True
+        self.locked = False
+        self.reset_on_enter = True
+        self.hide_footer = False
+        self.hide_header = False
 
     def think(self, ins, delta_ms, app):
         pass
@@ -22,9 +26,35 @@ class Page:
     def get_settings(self):
         return None
 
-    def set_settings(self):
+    def set_settings(self, settings):
         pass
 
+class MultiPage(Page):
+    #TODO: get_settings, set_settings
+    def __init__(self, name, subpages):
+        super().__init__(name)
+        self.subpages = subpages
+        for subpage in self.subpages:
+            self.hide_footer = True
+            self.hide_header = True
+
+    def finalize(self, channel, lfo_signal, env_signals):
+        for subpage in self.subpages:
+            subpage.finalize(channel, lfo_signal, env_signals)
+
+    def think(self, ins, delta_ms, app):
+        self.subwindow %= len(self.subpages)
+        self.subpages[self.subwindow].think(ins, delta_ms, app)
+
+    def draw(self, ctx, app):
+        self.subwindow %= len(self.subpages)
+        if self.full_redraw:
+            for subpage in self.subpages:
+                subpage.full_redraw = True
+            self.full_redraw = False
+        self.subpages[self.subwindow].draw(ctx, app)
+        app.draw_title(ctx, self.name)
+        app.draw_modulator_indicator(ctx, self.subpages[self.subwindow].name, col=app.cols.alt)
 
 class SavePage(Page):
     def load(self, app):
@@ -60,11 +90,11 @@ class SavePage(Page):
         return "slot" + str(num + 1) + ".json"
 
     def think(self, ins, delta_ms, app):
-        if app.input.captouch.petals[7].whole.pressed:
-            self._slot = (self._slot - 1) % self.num_slots
-            self.full_redraw = True
-        if app.input.captouch.petals[3].whole.pressed:
-            self._slot = (self._slot + 1) % self.num_slots
+        lr_dir = app.input.captouch.petals[3].whole.pressed - app.input.captouch.petals[7].whole.pressed
+        if self.locked:
+            lr_dir += app.input.buttons.app.right.pressed - app.input.buttons.app.left.pressed
+        if lr_dir:
+            self._slot = (self._slot + lr_dir) % self.num_slots
             self.full_redraw = True
 
         if ins.captouch.petals[1].pressed:

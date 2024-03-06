@@ -8,9 +8,6 @@ class ColorTheme:
         self.fg = colours.hsv_to_rgb(*fg_hsv)
         self.alt = colours.hsv_to_rgb(*alt_hsv)
         self.hi = colours.hsv_to_rgb(*hi_hsv)
-        self.lfo = self.alt
-        self.env = self.hi
-
 
 colorthemes = {}
 colorthemes["standard"] = ColorTheme(

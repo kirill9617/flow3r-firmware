@@ -56,15 +56,6 @@ class MelodicApp(Application):
         self._scale_setup_root = 0
         self._scale_setup_root_mode = False
 
-    def get_col(self, index):
-        index = index % 3
-        if index == 0:
-            return self.cols.fg
-        if index == 1:
-            return self.cols.env
-        if index == 2:
-            return self.cols.lfo
-
     def base_scale_get_val_from_mod_index(self, index):
         o = index // len(self.base_scale)
         i = index % len(self.base_scale)
@@ -119,13 +110,18 @@ class MelodicApp(Application):
         ctx.arc(0, 150, 100, 0, math.tau, 1).fill()
         rad = 50
         pos = 83
+        lr_arrows = False
         if text is None:
             arrow = not sub
-            text = ["mods", "env mod", "lfo mod"][sub]
+            text = ["mods", "env", "lfo"][sub]
+            lr_arrows = not arrow
         if arrow:
             rad = 45
         if col is None:
-            ctx.rgb(*self.get_col(sub))
+            if sub:
+                ctx.rgb(*self.cols.hi)
+            else:
+                ctx.rgb(*self.cols.fg)
         else:
             ctx.rgb(*col)
         if sub == 1:
@@ -141,6 +137,12 @@ class MelodicApp(Application):
             ctx.rel_line_to(10, 5)
             ctx.rel_line_to(10, -5)
             ctx.stroke()
+        if lr_arrows:
+            for i in [-1,1]:
+                ctx.move_to(63 * i, 86)
+                ctx.rel_line_to(5*i, 4)
+                ctx.rel_line_to(-5*i, 3)
+                ctx.stroke()
         ctx.move_to(0, pos)
         ctx.text(text)
         ctx.restore()
@@ -157,6 +159,20 @@ class MelodicApp(Application):
             unit = str(norms[0]) + "%"
         if len(norms) == 1 and skip_redraw > 1:
             return
+
+        labelcol = self.cols.alt
+        if sub:
+            handlecol = self.cols.fg
+            barcol = self.cols.alt
+            subbarcol = self.cols.alt
+            unitcol = self.cols.alt
+            framecol = self.cols.hi
+        else:
+            handlecol = self.cols.alt
+            barcol = self.cols.fg
+            subbarcol = self.cols.hi
+            unitcol = self.cols.hi
+            framecol = self.cols.fg
 
         labelsize = 18
         unitsize = 16
@@ -200,50 +216,22 @@ class MelodicApp(Application):
             ctx.move_to(labelstart * sign, -15)
             ctx.text_align = labelalign
             ctx.font_size = labelsize
-            ctx.rgb(*self.cols.alt)
+            ctx.rgb(*labelcol)
             ctx.text(label)
 
         ctx.move_to(unitend * sign, 10 + unitsize)
-        if len(norms) == 1:
-            if skip_redraw:
-                ctx.rgb(*self.cols.bg)
-                ctx.rectangle((unitend - 1) * sign, 13, 80 * sign, 17).fill()
-            ctx.rgb(*self.cols.hi)
-            ctx.text_align = unitalign
-            ctx.font_size = unitsize
-            ctx.text(unit)
-        elif len(norms) == 2:
-            if skip_redraw:
-                ctx.rgb(*self.cols.bg)
-                ctx.rectangle((unitend - 1) * sign, 13, 80 * sign, 17).fill()
-            ctx.rgb(*self.cols.hi)
-            ctx.text_align = unitalign
-            ctx.font_size = unitsize
-            ctx.text(unit)
+        if skip_redraw:
+            ctx.rgb(*self.cols.bg)
+            ctx.rectangle((unitend - 1) * sign, 13, 80 * sign, 17).fill()
+
+        ctx.rgb(*unitcol)
+        ctx.text_align = unitalign
+        ctx.font_size = unitsize
+        ctx.text(unit)
 
         if skip_redraw == 0:
-            if not sub:
-                ctx.rgb(*self.cols.fg)
-                ctx.rectangle(barstart * sign, -10, barlen * sign, 20).stroke()
-            else:
-                ctx.rgb(*self.get_col(sub))
-                wl = 6
-                tl = wl * 1.5
-                ml = barlen - 2 * (tl + 8)
-                for x in [-1, 1]:
-                    ctx.move_to((barstart + tl) * sign, -10 * x)
-                    ctx.rel_line_to(-tl * sign, 0)
-                    ctx.rel_line_to(0, wl * x)
-                    ctx.stroke()
-                    ctx.move_to((barstart + barlen - tl) * sign, -10 * x)
-                    ctx.rel_line_to(tl * sign, 0)
-                    ctx.rel_line_to(0, wl * x)
-                    ctx.stroke()
-                ctx.rgb(*self.cols.fg)
-                for x in [-1, 1]:
-                    ctx.move_to((barstart + (barlen - ml) / 2) * sign, -10 * x)
-                    ctx.rel_line_to(ml * sign, 0)
-                    ctx.stroke()
+            ctx.rgb(*framecol)
+            ctx.rectangle(barstart * sign, -10, barlen * sign, 20).stroke()
         elif skip_redraw == 1:
             ctx.rgb(*self.cols.bg)
             ctx.rectangle((barstart + 4) * sign, -6, (barlen - 8) * sign, 12).fill()
@@ -251,7 +239,7 @@ class MelodicApp(Application):
             ctx.rgb(*self.cols.bg)
             ctx.rectangle((barstart + 4) * sign, 2, (barlen - 8) * sign, 4).fill()
 
-        ctx.rgb(*self.cols.fg)
+        ctx.rgb(*barcol)
 
         if len(norms) == 1:
             if plusminus:
@@ -269,7 +257,7 @@ class MelodicApp(Application):
                     (barlen - 10 - b) * sign * (norms[0] - 0.5),
                     10,
                 ).fill()
-                ctx.rgb(*self.get_col(sub))
+                ctx.rgb(*handlecol)
                 ctx.arc((barstart + barlen / 2) * sign, 0, 4, 0, math.tau, 1).fill()
             else:
                 ctx.rectangle(
@@ -293,7 +281,7 @@ class MelodicApp(Application):
                         (barlen - 10 - b) * sign * (norms[0] - 0.5),
                         7,
                     ).fill()
-                    ctx.rgb(*self.get_col(sub))
+                    ctx.rgb(*handlecol)
                     ctx.arc(
                         (barstart + barlen / 2) * sign, -1.5, 3.5, 0, math.tau, 0
                     ).fill()
@@ -301,10 +289,7 @@ class MelodicApp(Application):
                     ctx.rectangle(
                         (barstart + 5) * sign, -5, (barlen - 10) * sign * norms[0], 7
                     ).fill()
-            if not sub:
-                ctx.rgb(*self.cols.hi)
-            else:
-                ctx.rgb(*self.cols.fg)
+            ctx.rgb(*subbarcol)
             ctx.rectangle(
                 (barstart + 5) * sign, 3, (barlen - 10) * sign * norms[1], 2
             ).fill()
@@ -326,40 +311,21 @@ class MelodicApp(Application):
         ctx.rgb(*self.cols.bg).rectangle(-120, -120, 240, 240).fill()
         ctx.text_align = ctx.CENTER
 
-        pos_of_petal = [x * 0.87 + 85 for x in self.scale]
+        pos = [x * 0.87 + 85 for x in self.scale]
+        start = [math.tau * (0.75 - 0.04 + i / 10) for i in range(10)]
+        stop = [math.tau * (0.75 + 0.04 + i / 10) for i in range(10)]
 
         ctx.rgb(*self.cols.fg)
         ctx.line_width = 35
         for i in range(10):
-            ctx.arc(
-                0,
-                0,
-                pos_of_petal[i],
-                math.tau * (0.75 - 0.04 + i / 10),
-                math.tau * (0.75 + 0.04 + i / 10),
-                0,
-            ).stroke()
+            ctx.arc(0,0,pos[i],start[i],stop[i],0).stroke()
         ctx.line_width = 4
         ctx.rgb(*[x * 0.75 for x in self.cols.fg])
         for i in range(10):
-            ctx.arc(
-                0,
-                0,
-                pos_of_petal[i] - 26,
-                math.tau * (0.75 - 0.04 + i / 10),
-                math.tau * (0.75 + 0.04 + i / 10),
-                0,
-            ).stroke()
+            ctx.arc(0,0,pos[i] - 26,start[i],stop[i],0).stroke()
         ctx.rgb(*[x * 0.5 for x in self.cols.fg])
         for i in range(10):
-            ctx.arc(
-                0,
-                0,
-                pos_of_petal[i] - 36,
-                math.tau * (0.75 - 0.04 + i / 10),
-                math.tau * (0.75 + 0.04 + i / 10),
-                0,
-            ).stroke()
+            ctx.arc(0,0,pos[i] - 36,start[i],stop[i],0).stroke()
 
         ctx.rotate(-math.tau / 4)
         ctx.text_align = ctx.CENTER
@@ -368,7 +334,7 @@ class MelodicApp(Application):
         ctx.rgb(*self.cols.bg)
         for i in range(10):
             ctx.rgb(*self.cols.bg)
-            ctx.move_to(pos_of_petal[i], 6)
+            ctx.move_to(pos[i], 6)
             note = bl00mbox.helpers.sct_to_note_name(self.scale[i] * 200 + 18367)
             ctx.text(note[:-1])
             ctx.rotate(math.tau / 10)
@@ -432,6 +398,13 @@ class MelodicApp(Application):
             self.mod_env.always_render = True
             self.mod_env.signals.trigger = self.poly_squeeze.signals.trigger_out[0]
 
+            self.lfo2 = self.blm.new(rand_lfo)
+            self.mod_env2 = self.blm.new(env)
+            self.mod_env2.always_render = True
+            self.mod_env2.signals.trigger = self.poly_squeeze.signals.trigger_out[0]
+
+            self.sensors = self.blm.new(sensors)
+
             self._signal_lfo = self.lfo.signals.output
             self._signal_env = self.synth.signals.envelope_data
             self._signal_mod_env = self.mod_env.signals.envelope_data
@@ -441,8 +414,14 @@ class MelodicApp(Application):
             self.synth_pages = []
             self.synth_pages += [self.synth.make_filter_page()]
             self.synth_pages += [self.synth.make_env_page(toggle=self.drone_toggle)]
-            self.synth_pages += [self.mod_env.make_page(name="mod env")]
-            self.synth_pages += [self.lfo.make_page()]
+
+            mod_pages = []
+            mod_pages += [self.mod_env.make_page(name="env 1")]
+            mod_pages += [self.mod_env2.make_page(name="env 2")]
+            mod_pages += [self.lfo.make_page(name="lfo 1")]
+            mod_pages += [self.lfo2.make_page(name="lfo 2")]
+            mod_pages += [self.sensors.make_page(name="sensors")]
+            self.synth_pages += [MultiPage("mods", mod_pages)]
 
             self.osc_pages = [None, None]
 
@@ -454,9 +433,9 @@ class MelodicApp(Application):
 
     def update_leds(self, init=False):
         norm = self.env_value / 2 + 0.5
-        env = [x * norm for x in self.cols.env]
+        env = [x * norm for x in self.cols.alt]
         norm = self.lfo_value / 2 + 0.5
-        lfo = [x * norm for x in self.cols.lfo]
+        lfo = [x * norm for x in self.cols.hi]
         for i in range(0, 40, 8):
             for k in [2]:
                 leds.set_rgb((i + k) % 40, *lfo)
@@ -550,6 +529,8 @@ class MelodicApp(Application):
 
     def think(self, ins, delta_ms):
         super().think(ins, delta_ms)
+        self.sensors.update_data(ins.imu.acc)
+
         if self.blm is None:
             return
 
@@ -601,18 +582,16 @@ class MelodicApp(Application):
                     self.poly_squeeze.signals.trigger_in[i].stop()
             self.drone_toggle.changed = False
 
-        if self.input.buttons.app.right.pressed:
+        lr_dir = self.input.buttons.app.right.pressed - self.input.buttons.app.left.pressed
+        if lr_dir:
             if self.mode_main:
-                self.shift_playing_field_by_num_petals(4)
+                self.shift_playing_field_by_num_petals(4 * lr_dir)
             else:
-                self.active_page = (self.active_page + 1) % len(self.pages)
-                self.pages[self.active_page].full_redraw = True
-        elif self.input.buttons.app.left.pressed:
-            if self.mode_main:
-                self.shift_playing_field_by_num_petals(-4)
-            else:
-                self.active_page = (self.active_page - 1) % len(self.pages)
-                self.pages[self.active_page].full_redraw = True
+                if not self.pages[self.active_page].locked:
+                    self.active_page = (self.active_page + lr_dir) % len(self.pages)
+                    self.pages[self.active_page].full_redraw = True
+                    if self.pages[self.active_page].reset_on_enter:
+                        self.pages[self.active_page].subwindow = 0
 
         if self.mode_main:
             return
