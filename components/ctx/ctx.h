@@ -1,4 +1,4 @@
-/* ctx git commit: be3ebcdc */
+/* ctx git commit: 2dccc54c */
 /* 
  * ctx.h is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -872,7 +872,6 @@ void ctx_render_stream  (Ctx *ctx, FILE *stream, int longform);
 void ctx_render_fd      (Ctx *ctx, int fd, int longform);
 
 void ctx_render_ctx     (Ctx *ctx, Ctx *d_ctx);
-void ctx_render_ctx2    (Ctx *ctx, Ctx *d_ctx);
 void ctx_render_ctx_textures (Ctx *ctx, Ctx *d_ctx); /* cycles through all
                                                         used texture eids
                                                       */
@@ -1688,7 +1687,6 @@ typedef enum
 
 
 typedef struct _CtxCommand CtxCommand;
-#define CTX_ASSERT               0
 
 #if CTX_ASSERT==1
 #define ctx_assert(a)  if(!(a)){fprintf(stderr,"%s:%i assertion failed\n", __FUNCTION__, __LINE__);  }
@@ -5133,8 +5131,10 @@ static inline CtxList *ctx_list_find_custom (CtxList *list,
 #define CTX_MIN_EDGE_LIST_SIZE   1024*4
 #endif
 
+
+// 3 5 or 15 - this is the AA used for worst-case scanlines; with crossings or edge start|ends
 #ifndef CTX_RASTERIZER_AA
-#define CTX_RASTERIZER_AA 15   // vertical-AA of CTX_ANTIALIAS_DEFAULT
+#define CTX_RASTERIZER_AA 5    // vertical-AA of CTX_ANTIALIAS_DEFAULT
 #endif
 
 /* The maximum complexity of a single path
@@ -5698,7 +5698,7 @@ static inline CtxList *ctx_list_find_custom (CtxList *list,
 #endif
 
 #ifndef CTX_BRANCH_HINTS
-#define CTX_BRANCH_HINTS  1
+#define CTX_BRANCH_HINTS  0
 #endif
 
 #ifdef EMSCRIPTEN
@@ -5832,7 +5832,11 @@ static inline CtxList *ctx_list_find_custom (CtxList *list,
 #endif
 
 #ifndef CTX_VT_STYLE_SIZE
-#define CTX_VT_STYLE_SIZE 32
+#define CTX_VT_STYLE_SIZE 64
+#endif
+
+#ifndef CTX_ASSERT
+#define CTX_ASSERT               0
 #endif
  /* Copyright (C) 2020 Øyvind Kolås <pippin@gimp.org>
  */
@@ -6074,19 +6078,19 @@ ctx_expf (float x)
 #if !__COSMOPOLITAN__
 #include <math.h>
 #endif
-static inline float ctx_fabsf (float x)           { return fabsf (x); }
-static inline float ctx_floorf (float x)          { return floorf (x); }
-static inline float ctx_asinf (float x)            { return asinf (x); }
-static inline float ctx_sinf (float x)            { return sinf (x); }
-static inline float ctx_atan2f (float y, float x) { return atan2f (y, x); }
-static inline float ctx_hypotf (float a, float b) { return hypotf (a, b); }
-static inline float ctx_acosf (float a)           { return acosf (a); }
-static inline float ctx_cosf (float a)            { return cosf (a); }
-static inline float ctx_tanf (float a)            { return tanf (a); }
-static inline float ctx_expf (float p)            { return expf (p); }
-static inline float ctx_sqrtf (float a)           { return sqrtf (a); }
+static CTX_INLINE float ctx_fabsf (float x)           { return fabsf (x); }
+static CTX_INLINE float ctx_floorf (float x)          { return floorf (x); }
+static CTX_INLINE float ctx_asinf (float x)            { return asinf (x); }
+static CTX_INLINE float ctx_sinf (float x)            { return sinf (x); }
+static CTX_INLINE float ctx_atan2f (float y, float x) { return atan2f (y, x); }
+static CTX_INLINE float ctx_hypotf (float a, float b) { return hypotf (a, b); }
+static CTX_INLINE float ctx_acosf (float a)           { return acosf (a); }
+static CTX_INLINE float ctx_cosf (float a)            { return cosf (a); }
+static CTX_INLINE float ctx_tanf (float a)            { return tanf (a); }
+static CTX_INLINE float ctx_expf (float p)            { return expf (p); }
+static CTX_INLINE float ctx_sqrtf (float a)           { return sqrtf (a); }
 
-static inline float ctx_hypotf_fast (float a, float b)
+static CTX_INLINE float ctx_hypotf_fast (float a, float b)
 {
   return ctx_sqrtf (ctx_pow2 (a)+ctx_pow2 (b) );
 }
@@ -10297,7 +10301,7 @@ struct _CtxBuffer
   void       *space; 
 #endif
 #endif
-#if 1
+#if CTX_ENABLE_CM
   CtxBuffer          *color_managed; /* only valid for one render target, cache
                                         for a specific space
                                         */
@@ -11814,18 +11818,6 @@ ctx_RGBA8_mul_alpha_u32(uint32_t val, uint8_t global_alpha)
   return  g|rb|(a << CTX_RGBA8_A_SHIFT);
 }
 
-CTX_INLINE static void
-ctx_RGBA8_associate_alpha_probably_opaque (uint8_t *u8)
-{
-  uint32_t a = u8[3];//val>>24;//u8[3];
-  if (CTX_UNLIKELY(a!=255))
-  {
-    u8[0] = (u8[0] * a + 255) >> 8;
-    u8[1] = (u8[1] * a + 255) >> 8;
-    u8[2] = (u8[2] * a + 255) >> 8;
-  }
-}
-
 CTX_INLINE static uint32_t ctx_bi_RGBA8 (uint32_t isrc00, uint32_t isrc01, uint32_t isrc10, uint32_t isrc11, uint8_t dx, uint8_t dy)
 {
 #if 0
@@ -11864,7 +11856,7 @@ inline static int ctx_grad_index (CtxRasterizer *rasterizer, float v)
   return ret;
 }
 
-inline static int ctx_grad_index_i (CtxRasterizer *rasterizer, int v)
+CTX_INLINE static int ctx_grad_index_i (CtxRasterizer *rasterizer, int v)
 {
   v = v >> 8;
   return ctx_maxi (0, ctx_mini (rasterizer->gradient_cache_elements-1, v));
@@ -12133,7 +12125,11 @@ ctx_fragment_image_RGBA8 (CtxRasterizer *rasterizer, float x, float y, float z, 
 {
   uint8_t *rgba = (uint8_t *) out;
   CtxSource *g = &rasterizer->state->gstate.source_fill;
+#if CTX_ENABLE_CM
   CtxBuffer *buffer = g->texture.buffer->color_managed?g->texture.buffer->color_managed:g->texture.buffer;
+#else
+  CtxBuffer *buffer = g->texture.buffer;
+#endif
   uint8_t global_alpha_u8 = rasterizer->state->gstate.global_alpha_u8;
   uint8_t is_assoc = (buffer->format->pixel_format == CTX_FORMAT_RGBA8 ||
                       buffer->format->pixel_format == CTX_FORMAT_BGRA8);
@@ -12178,7 +12174,7 @@ ctx_fragment_image_RGBA8 (CtxRasterizer *rasterizer, float x, float y, float z, 
                                    ctx_lerp_u8 (src10[0], src11[0], dxb), dyb);
             rgba[3] = global_alpha_u8;
             break;
-          case 2:
+	  case 2: // TODO : could be RGB565
             rgba[0] = rgba[1] = rgba[2] = ctx_lerp_u8 (ctx_lerp_u8 (src00[0], src01[0], dxb),
                                    ctx_lerp_u8 (src10[0], src11[0], dxb), dyb);
             rgba[3] = ctx_lerp_u8 (ctx_lerp_u8 (src00[1], src01[1], dxb),
@@ -12229,7 +12225,7 @@ ctx_fragment_image_RGBA8 (CtxRasterizer *rasterizer, float x, float y, float z, 
               { rgba[c] = src[0]; }
             rgba[3] = global_alpha_u8;
             break;
-          case 2:
+          case 2: // todo could be RGB 565
             for (int c = 0; c < 3; c++)
               { rgba[c] = src[0]; }
             rgba[3] = src[1];
@@ -12268,7 +12264,7 @@ ctx_fragment_image_RGBA8 (CtxRasterizer *rasterizer, float x, float y, float z, 
       }
     }
     if (!is_assoc)
-      ctx_RGBA8_associate_alpha_probably_opaque (rgba);
+      ctx_RGBA8_associate_alpha (rgba);
     rgba += 4;
     x += dx;
     y += dy;
@@ -12412,7 +12408,11 @@ ctx_fragment_image_rgb8_RGBA8_box (CtxRasterizer *rasterizer,
 {
   uint8_t *rgba = (uint8_t *) out;
   CtxSource *g = &rasterizer->state->gstate.source_fill;
+#if CTX_ENABLE_CM
   CtxBuffer *buffer = g->texture.buffer->color_managed?g->texture.buffer->color_managed:g->texture.buffer;
+#else
+  CtxBuffer *buffer = g->texture.buffer;
+#endif
   int width = buffer->width;
   int height = buffer->height;
   uint8_t global_alpha_u8 = rasterizer->state->gstate.global_alpha_u8;
@@ -12461,7 +12461,7 @@ ctx_fragment_image_rgb8_RGBA8_box (CtxRasterizer *rasterizer,
           int recip = 65536/count;
           for (int c = 0; c < bpp; c++)
             rgba[c] = sum[c] * recip >> 16;
-          ctx_RGBA8_associate_alpha_probably_opaque (rgba);
+          ctx_RGBA8_associate_alpha (rgba);
     }
     rgba += 4;
     x += dx;
@@ -12505,7 +12505,7 @@ ctx_RGBA8_apply_global_alpha_and_associate (CtxRasterizer *rasterizer,
   {
     for (int i = 0; i < count; i++)
     {
-      ctx_RGBA8_associate_alpha_probably_opaque (rgba);
+      ctx_RGBA8_associate_alpha (rgba);
       rgba += 4;
     }
   }
@@ -12541,7 +12541,11 @@ ctx_fragment_image_rgb8_RGBA8_nearest (CtxRasterizer *rasterizer,
   uint8_t global_alpha_u8 = rasterizer->state->gstate.global_alpha_u8;
   uint8_t *rgba = (uint8_t *) out;
   CtxSource *g = &rasterizer->state->gstate.source_fill;
+#if CTX_ENABLE_CM
   CtxBuffer *buffer = g->texture.buffer->color_managed?g->texture.buffer->color_managed:g->texture.buffer;
+#else
+  CtxBuffer *buffer = g->texture.buffer;
+#endif
   const int bwidth = buffer->width;
   const int bheight = buffer->height;
   unsigned int i = 0;
@@ -12601,7 +12605,7 @@ ctx_fragment_image_rgb8_RGBA8_nearest (CtxRasterizer *rasterizer,
     for (unsigned int c = 0; c < 3; c++)
       rgba[c] = data[(bwidth *v +u)*3+c];
     rgba[3] = global_alpha_u8;
-    ctx_RGBA8_associate_alpha_probably_opaque (rgba);
+    ctx_RGBA8_associate_alpha (rgba);
     xi += xi_delta;
     yi += yi_delta;
     zi += zi_delta;
@@ -12679,7 +12683,11 @@ ctx_fragment_image_rgba8_RGBA8_box (CtxRasterizer *rasterizer,
 {
   uint8_t *rgba = (uint8_t *) out;
   CtxSource *g = &rasterizer->state->gstate.source_fill;
+#if CTX_ENABLE_CM
   CtxBuffer *buffer = g->texture.buffer->color_managed?g->texture.buffer->color_managed:g->texture.buffer;
+#else
+  CtxBuffer *buffer = g->texture.buffer;
+#endif
   int width = buffer->width;
   int height = buffer->height;
   uint8_t global_alpha_u8 = rasterizer->state->gstate.global_alpha_u8;
@@ -12728,7 +12736,7 @@ ctx_fragment_image_rgba8_RGBA8_box (CtxRasterizer *rasterizer,
           for (int c = 0; c < bpp; c++)
             rgba[c] = sum[c] * recip >> 16;
           rgba[3]=rgba[3]*global_alpha_u8/255; // gets lost
-          ctx_RGBA8_associate_alpha_probably_opaque (rgba);
+          ctx_RGBA8_associate_alpha (rgba);
     }
     rgba += 4;
     x += dx;
@@ -12752,54 +12760,53 @@ static void
 ctx_fragment_image_rgba8_RGBA8_nearest_copy (CtxRasterizer *rasterizer,
                                              float x, float y, float z,
                                              void *out, int scount, float dx, float dy, float dz)
-{
+{ 
   unsigned int count = scount;
   CtxSource *g = &rasterizer->state->gstate.source_fill;
-  CtxBuffer *buffer = 
-     g->texture.buffer->color_managed?g->texture.buffer->color_managed:g->texture.buffer;
-  uint32_t *dst = (uint32_t*)out;
-#if 0
-  for (int i = 0; i < scount; i++)
-          dst[i] = (255<<24)+128;
-  return;
+#if CTX_ENABLE_CM
+  CtxBuffer *buffer = g->texture.buffer->color_managed?g->texture.buffer->color_managed:g->texture.buffer;
+#else
+  CtxBuffer *buffer = g->texture.buffer;
 #endif
+  uint32_t *dst = (uint32_t*)out;
   int bwidth  = buffer->width;
   int bheight = buffer->height;
   int u = (int)x;
   int v = (int)y;
 
-  uint32_t *src = ((uint32_t*)buffer->data) + bwidth * v + u;
-  if (CTX_UNLIKELY(!((v >= 0) & (v < bheight))))
+  if ((!((v >= 0) & (v < bheight))))
   {
-    for (unsigned i = 0 ; i < count; i++)
-      *dst++ = 0;
+    memset (dst, 0, count*4);
     return;
   }
-
-#if 1
+  uint32_t *src = ((uint32_t*)buffer->data) + bwidth * v + u;
+#if defined(__GNUC__) && !defined(__clang__)
   int pre = ctx_mini(ctx_maxi(-u,0), count);
-  memset (dst, 0, pre);
-  dst +=pre;
+  for (int i = 0; i < pre;i++)
+  { *dst++ = 0; }
   count-=pre;
   src+=pre;
   u+=pre;
-#else
-  while (count && !(u >= 0))
-  {
-    *dst++ = 0;
-    src ++;
-    u++;
-    count--;
-  }
-#endif
-
+ 
   int limit = ctx_mini (count, bwidth - u);
   if (limit>0)
   {
-    memcpy (dst, src, limit * 4);
-    dst += limit;
+    for (int i = 0; i < limit;i++)
+     { *dst++ = *src++; }
   }
-  memset (dst, 0, count - limit);
+
+  count-=limit;
+  for (unsigned int i = 0; i < count; i++)
+    *dst++ = 0;
+#else
+  int i = 0;
+  for (; (u<0) & ((unsigned)i < count); i++,u++,src++)
+    *dst++ = 0;
+  for (; (u<bwidth) & ((unsigned)i<count); i++, u++)
+    *dst++ = *src++;
+  for (; ((unsigned)i<count); i++)
+    *dst++ = 0;
+#endif
 }
 
 static void
@@ -12817,8 +12824,11 @@ ctx_fragment_image_rgba8_RGBA8_nearest_copy_repeat (CtxRasterizer *rasterizer,
                                                     void *out, int count, float dx, float dy, float dz)
 {
   CtxSource *g = &rasterizer->state->gstate.source_fill;
-  CtxBuffer *buffer = 
-     g->texture.buffer->color_managed?g->texture.buffer->color_managed:g->texture.buffer;
+#if CTX_ENABLE_CM
+  CtxBuffer *buffer = g->texture.buffer->color_managed?g->texture.buffer->color_managed:g->texture.buffer;
+#else
+  CtxBuffer *buffer = g->texture.buffer;
+#endif
   uint32_t *dst = (uint32_t*)out;
   int bwidth  = buffer->width;
   int bheight = buffer->height;
@@ -12841,7 +12851,7 @@ ctx_fragment_image_rgba8_RGBA8_nearest_copy_repeat (CtxRasterizer *rasterizer,
   }
 }
 
-static CTX_INLINE int
+static CTX_INLINE void 
 _ctx_coords_restrict (CtxExtend extend,
                       int *u, int *v,
                       int bwidth, int bheight)
@@ -12859,7 +12869,8 @@ _ctx_coords_restrict (CtxExtend extend,
         while (*v < 0) *v += bheight * 4096;
         *v  %= bheight;
       }
-      return 1;
+  //  return 1;
+      break;
     case CTX_EXTEND_REFLECT:
       if (u)
       {
@@ -12878,17 +12889,21 @@ _ctx_coords_restrict (CtxExtend extend,
            (*v<bheight) * *v;
       }
 
-      return 1;
+ //   return 1;
+      break;
     case CTX_EXTEND_PAD:
       if (u)*u = ctx_mini (ctx_maxi (*u, 0), bwidth-1);
       if (v)*v = ctx_mini (ctx_maxi (*v, 0), bheight-1);
-      return 1;
+ //   return 1;
+      break;
     case CTX_EXTEND_NONE:
-      if (u && ((*u < 0) | (*u >= bwidth))) return 0;
-      if (v && ((*v < 0) | (*v >= bheight))) return 0;
-      return 1;
+      {
+      if (u) { int val=*u;  val *= (val>0); val= (val>=bwidth)*bwidth + val * (val<bwidth);  *u = val;}
+      if (v) { int val=*v;  val *= (val>0); val= (val>=bheight)*bheight + val * (val<bheight); *v = val;}
+  //  return 1;
+      }
   }
-  return 0;
+ //return 0;
 }
 
 static void
@@ -12900,7 +12915,11 @@ ctx_fragment_image_rgba8_RGBA8_nearest_affine (CtxRasterizer *rasterizer,
   uint8_t global_alpha_u8 = rasterizer->state->gstate.global_alpha_u8;
   uint8_t *rgba = (uint8_t *) out;
   CtxSource *g = &rasterizer->state->gstate.source_fill;
+#if CTX_ENABLE_CM
   CtxBuffer *buffer = g->texture.buffer->color_managed?g->texture.buffer->color_managed:g->texture.buffer;
+#else
+  CtxBuffer *buffer = g->texture.buffer;
+#endif
   CtxExtend extend = rasterizer->state->gstate.extend;
   const int bwidth = buffer->width;
   const int bheight = buffer->height;
@@ -13011,10 +13030,13 @@ ctx_fragment_image_rgba8_RGBA8_nearest_scale (CtxRasterizer *rasterizer,
   unsigned int count = scount;
   CtxSource *g = &rasterizer->state->gstate.source_fill;
   uint8_t global_alpha_u8 = rasterizer->state->gstate.global_alpha_u8;
-  CtxBuffer *buffer = NULL;
   CtxExtend  extend = rasterizer->state->gstate.extend;
   uint32_t *src = NULL;
-  buffer = g->texture.buffer->color_managed?g->texture.buffer->color_managed:g->texture.buffer;
+#if CTX_ENABLE_CM
+  CtxBuffer *buffer = g->texture.buffer->color_managed?g->texture.buffer->color_managed:g->texture.buffer;
+#else
+  CtxBuffer *buffer = g->texture.buffer;
+#endif
   int ideltax = (int)(dx * 65536);
   uint32_t *dst = (uint32_t*)out;
   int bwidth  = buffer->width;
@@ -13112,7 +13134,11 @@ ctx_fragment_image_rgba8_RGBA8_nearest_generic (CtxRasterizer *rasterizer,
   uint8_t global_alpha_u8 = rasterizer->state->gstate.global_alpha_u8;
   uint8_t *rgba = (uint8_t *) out;
   CtxSource *g = &rasterizer->state->gstate.source_fill;
+#if CTX_ENABLE_CM
   CtxBuffer *buffer = g->texture.buffer->color_managed?g->texture.buffer->color_managed:g->texture.buffer;
+#else
+  CtxBuffer *buffer = g->texture.buffer;
+#endif
   CtxExtend extend = rasterizer->state->gstate.extend;
   const int bwidth = buffer->width;
   const int bheight = buffer->height;
@@ -13256,15 +13282,20 @@ ctx_fragment_image_rgba8_RGBA8_nearest (CtxRasterizer *rasterizer,
 static inline void
 ctx_fragment_image_rgba8_RGBA8_bi_scale_with_alpha (CtxRasterizer *rasterizer,
                                                     float x, float y, float z,
-                                                    void *out, int scount, float dx, float dy, float dz, uint8_t global_alpha_u8)
+                                                    void *out, int scount, float dx, float dy, float dz)
 {
+    uint8_t global_alpha_u8 = rasterizer->state->gstate.global_alpha_u8;
     uint32_t count = scount;
     x -= 0.5f;
     y -= 0.5f;
     uint8_t *rgba = (uint8_t *) out;
     CtxSource *g = &rasterizer->state->gstate.source_fill;
     CtxExtend  extend = rasterizer->state->gstate.extend;
-    CtxBuffer *buffer = g->texture.buffer->color_managed?g->texture.buffer->color_managed:g->texture.buffer;
+#if CTX_ENABLE_CM
+  CtxBuffer *buffer = g->texture.buffer->color_managed?g->texture.buffer->color_managed:g->texture.buffer;
+#else
+  CtxBuffer *buffer = g->texture.buffer;
+#endif
     const int bwidth = buffer->width;
     const int bheight = buffer->height;
     unsigned int i = 0;
@@ -13317,12 +13348,8 @@ ctx_fragment_image_rgba8_RGBA8_bi_scale_with_alpha (CtxRasterizer *rasterizer,
 
  
   int v = yi >> 16;
-
-
   int dv = (yi >> 8) & 0xff;
-
   int u = xi >> 16;
-
   int v1 = v+1;
 
   _ctx_coords_restrict (extend, &u, &v, bwidth, bheight);
@@ -13450,21 +13477,17 @@ ctx_fragment_image_rgba8_RGBA8_bi_scale (CtxRasterizer *rasterizer,
                                          float x, float y, float z,
                                          void *out, int scount, float dx, float dy, float dz)
 {
-    uint8_t global_alpha_u8 = rasterizer->state->gstate.global_alpha_u8;
-    if (global_alpha_u8 != 255)
-    {
-      ctx_fragment_image_rgba8_RGBA8_bi_scale_with_alpha (rasterizer,
-                                         x, y, z,
-                                         out, scount, dx, dy, dz, global_alpha_u8);
-      return;
-    }
     uint32_t count = scount;
     x -= 0.5f;
     y -= 0.5f;
     uint8_t *rgba = (uint8_t *) out;
     CtxSource *g = &rasterizer->state->gstate.source_fill;
     CtxExtend  extend = rasterizer->state->gstate.extend;
-    CtxBuffer *buffer = g->texture.buffer->color_managed?g->texture.buffer->color_managed:g->texture.buffer;
+#if CTX_ENABLE_CM
+  CtxBuffer *buffer = g->texture.buffer->color_managed?g->texture.buffer->color_managed:g->texture.buffer;
+#else
+  CtxBuffer *buffer = g->texture.buffer;
+#endif
     const int bwidth = buffer->width;
     const int bheight = buffer->height;
     unsigned int i = 0;
@@ -13517,10 +13540,7 @@ ctx_fragment_image_rgba8_RGBA8_bi_scale (CtxRasterizer *rasterizer,
 
  
   int v = yi >> 16;
-
-
   int dv = (yi >> 8) & 0xff;
-
   int u = xi >> 16;
 
   int v1 = v+1;
@@ -13562,6 +13582,7 @@ ctx_fragment_image_rgba8_RGBA8_bi_scale (CtxRasterizer *rasterizer,
       int prev_u = -1000;
       for (; (i < count); i++)
       {
+#if 0
         if (prev_u == u-1)
         {
           s0_ga = s1_ga;
@@ -13569,7 +13590,9 @@ ctx_fragment_image_rgba8_RGBA8_bi_scale (CtxRasterizer *rasterizer,
           ctx_lerp_RGBA8_split (data[u+1],ndata[u+1], dv, &s1_ga, &s1_rb);
           prev_u = u;
         }
-        else if (prev_u != u)
+        else
+#endif
+        if (prev_u != u)
         {
           ctx_lerp_RGBA8_split (data[u],ndata[u], dv, &s0_ga, &s0_rb);
           ctx_lerp_RGBA8_split (data[u+1],ndata[u+1], dv, &s1_ga, &s1_rb);
@@ -13606,12 +13629,13 @@ ctx_fragment_image_rgba8_RGBA8_bi_scale (CtxRasterizer *rasterizer,
         src1 ++;
       }
     }
-    else
+    else // no extend
     {
       uint32_t s0_ga = 0, s1_ga = 0, s0_rb = 0, s1_rb = 0;
       int prev_u = -1000;
       for (; (i < count); i++)
       {
+#if 0
         if (prev_u == u-1)
         {
           s0_ga = s1_ga;
@@ -13619,7 +13643,9 @@ ctx_fragment_image_rgba8_RGBA8_bi_scale (CtxRasterizer *rasterizer,
           ctx_lerp_RGBA8_split (data[u+1],ndata[u+1], dv, &s1_ga, &s1_rb);
           prev_u++;
         }
-        else if (prev_u != u)
+        else
+#endif
+        if (prev_u != u)
         {
           ctx_lerp_RGBA8_split (data[u],ndata[u], dv, &s0_ga, &s0_rb);
           ctx_lerp_RGBA8_split (data[u+1],ndata[u+1], dv, &s1_ga, &s1_rb);
@@ -13637,14 +13663,19 @@ static inline void
 ctx_fragment_image_rgba8_RGBA8_bi_affine_with_alpha (CtxRasterizer *rasterizer,
                                           float x, float y, float z,
                                           void *out, int scount,
-                                          float dx, float dy, float dz, uint8_t global_alpha_u8)
+                                          float dx, float dy, float dz)
 {
+  uint8_t global_alpha_u8 = rasterizer->state->gstate.global_alpha_u8;
         x-=0.5f;
         y-=0.5f;
   uint32_t count = scount;
   uint8_t *rgba = (uint8_t *) out;
   CtxSource *g = &rasterizer->state->gstate.source_fill;
+#if CTX_ENABLE_CM
   CtxBuffer *buffer = g->texture.buffer->color_managed?g->texture.buffer->color_managed:g->texture.buffer;
+#else
+  CtxBuffer *buffer = g->texture.buffer;
+#endif
   CtxExtend extend = rasterizer->state->gstate.extend;
   const int bwidth = buffer->width;
   const int bheight = buffer->height;
@@ -13703,6 +13734,7 @@ ctx_fragment_image_rgba8_RGBA8_bi_affine_with_alpha (CtxRasterizer *rasterizer,
     int u = du >> 8;
     int dv = yi >> 8;
     int v = dv >> 8;
+#if 0
     if (CTX_UNLIKELY((u < 0) | (v < 0) | (u+1 >= bwidth) | (v+1 >=bheight))) // default to next sample down and to right
     {
       int u1 = u + 1;
@@ -13717,6 +13749,7 @@ ctx_fragment_image_rgba8_RGBA8_bi_affine_with_alpha (CtxRasterizer *rasterizer,
       src11 = data  + bwidth * v1 + u1;
     }
     else 
+#endif
     {
       src00 = data  + bwidth * v + u;
       src01 = src00 + 1;
@@ -13738,20 +13771,16 @@ ctx_fragment_image_rgba8_RGBA8_bi_affine (CtxRasterizer *rasterizer,
                                           void *out, int scount,
                                           float dx, float dy, float dz)
 {
-    uint8_t global_alpha_u8 = rasterizer->state->gstate.global_alpha_u8;
-    if (global_alpha_u8 != 255)
-    {
-      ctx_fragment_image_rgba8_RGBA8_bi_affine_with_alpha (rasterizer,
-                                         x, y, z,
-                                         out, scount, dx, dy, dz, global_alpha_u8);
-      return;
-    }
-        x-=0.5f;
-        y-=0.5f;
+  x-=0.5f;
+  y-=0.5f;
   uint32_t count = scount;
   uint8_t *rgba = (uint8_t *) out;
   CtxSource *g = &rasterizer->state->gstate.source_fill;
+#if CTX_ENABLE_CM
   CtxBuffer *buffer = g->texture.buffer->color_managed?g->texture.buffer->color_managed:g->texture.buffer;
+#else
+  CtxBuffer *buffer = g->texture.buffer;
+#endif
   CtxExtend extend = rasterizer->state->gstate.extend;
   const int bwidth = buffer->width;
   const int bheight = buffer->height;
@@ -13810,8 +13839,11 @@ ctx_fragment_image_rgba8_RGBA8_bi_affine (CtxRasterizer *rasterizer,
     int u = du >> 8;
     int dv = yi >> 8;
     int v = dv >> 8;
-    if (CTX_UNLIKELY((u < 0) | (v < 0) | (u+1 >= bwidth) | (v+1 >=bheight))) // default to next sample down and to right
-    {
+
+
+    //if (((u < 0) | (v < 0) | (u+1 >= bwidth) | (v+1 >=bheight))) // default to next sample down and to right
+#if 0
+    if(0){
       int u1 = u + 1;
       int v1 = v + 1;
 
@@ -13824,6 +13856,7 @@ ctx_fragment_image_rgba8_RGBA8_bi_affine (CtxRasterizer *rasterizer,
       src11 = data  + bwidth * v1 + u1;
     }
     else 
+#endif
     {
       src00 = data  + bwidth * v + u;
       src01 = src00 + 1;
@@ -13852,7 +13885,11 @@ ctx_fragment_image_rgba8_RGBA8_bi_generic (CtxRasterizer *rasterizer,
   uint8_t global_alpha_u8 = rasterizer->state->gstate.global_alpha_u8;
   uint8_t *rgba = (uint8_t *) out;
   CtxSource *g = &rasterizer->state->gstate.source_fill;
+#if CTX_ENABLE_CM
   CtxBuffer *buffer = g->texture.buffer->color_managed?g->texture.buffer->color_managed:g->texture.buffer;
+#else
+  CtxBuffer *buffer = g->texture.buffer;
+#endif
   CtxExtend extend = rasterizer->state->gstate.extend;
   const int bwidth = buffer->width;
   const int bheight = buffer->height;
@@ -14103,8 +14140,10 @@ ctx_fragment_image_yuv420_RGBA8_nearest (CtxRasterizer *rasterizer,
   uint8_t *rgba = (uint8_t *) out;
   CtxSource *g = &rasterizer->state->gstate.source_fill;
   CtxBuffer *buffer = g->texture.buffer;
+#if CTX_ENABLE_CM
   if (buffer->color_managed)
     buffer = buffer->color_managed;
+#endif
   uint8_t *src = (uint8_t *) buffer->data;
   int bwidth  = buffer->width;
   int bheight = buffer->height;
@@ -14282,6 +14321,8 @@ CTX_DECLARE_SWAP_RED_GREEN_FRAGMENT(ctx_fragment_image_rgba8_RGBA8_nearest_gener
 CTX_DECLARE_SWAP_RED_GREEN_FRAGMENT(ctx_fragment_image_rgba8_RGBA8_bi_scale)
 CTX_DECLARE_SWAP_RED_GREEN_FRAGMENT(ctx_fragment_image_rgba8_RGBA8_bi_affine)
 CTX_DECLARE_SWAP_RED_GREEN_FRAGMENT(ctx_fragment_image_rgba8_RGBA8_bi_generic)
+CTX_DECLARE_SWAP_RED_GREEN_FRAGMENT(ctx_fragment_image_rgba8_RGBA8_bi_scale_with_alpha)
+CTX_DECLARE_SWAP_RED_GREEN_FRAGMENT(ctx_fragment_image_rgba8_RGBA8_bi_affine_with_alpha)
 
 static inline void
 ctx_fragment_image_rgba8_RGBA8 (CtxRasterizer *rasterizer,
@@ -14466,8 +14507,7 @@ ctx_fragment_linear_gradient_RGBA8 (CtxRasterizer *rasterizer, float x, float y,
   for (int i = 0; i < count ; i++)
   {
 #if CTX_GRADIENT_CACHE
-  uint32_t*rgbap = ((uint32_t*)(&rasterizer->gradient_cache_u8[ctx_grad_index_i (rasterizer, vv)][0]));
-  *((uint32_t*)rgba) = *rgbap;
+  *((uint32_t*)rgba) = *((uint32_t*)(&rasterizer->gradient_cache_u8[ctx_grad_index_i (rasterizer, vv)][0]));
 #else
   _ctx_fragment_gradient_1d_RGBA8 (rasterizer, vv, 1.0, rgba);
 #endif
@@ -14486,6 +14526,7 @@ static void
 ctx_fragment_color_RGBA8 (CtxRasterizer *rasterizer, float x, float y, float z, void *out, int count, float dx, float dy, float dz)
 {
   uint8_t *rgba_out = (uint8_t *) out;
+  uint32_t *rgba_out_u32 = (uint32_t *) out;
   CtxSource *g = &rasterizer->state->gstate.source_fill;
   ctx_color_get_rgba8 (rasterizer->state, &g->color, rgba_out);
   ctx_RGBA8_associate_alpha (rgba_out);
@@ -14495,8 +14536,10 @@ ctx_fragment_color_RGBA8 (CtxRasterizer *rasterizer, float x, float y, float z, 
     rgba_out[0] = rgba_out[2];
     rgba_out[2] = tmp;
   }
-  for (int i = 1; i < count; i++, rgba_out+=4)
-    memcpy (rgba_out + count * 4, rgba_out, 4);
+  uint32_t icol;
+  memcpy(&icol, rgba_out, 4);
+  for (int i = 1; i < count; i++)
+    rgba_out_u32[i]=icol;
 }
 #if CTX_ENABLE_FLOAT
 
@@ -14559,7 +14602,11 @@ static void ctx_fragment_image_RGBAF (CtxRasterizer *rasterizer, float x, float 
   float *outf = (float *) out;
   uint8_t rgba[4 * count];
   CtxSource *g = &rasterizer->state->gstate.source_fill;
+#if CTX_ENABLE_CM
   CtxBuffer *buffer = g->texture.buffer->color_managed?g->texture.buffer->color_managed:g->texture.buffer;
+#else
+  CtxBuffer *buffer = g->texture.buffer;
+#endif
   switch (buffer->format->bpp)
     {
 #if CTX_FRAGMENT_SPECIALIZE
@@ -14616,9 +14663,12 @@ static CtxFragment ctx_rasterizer_get_fragment_RGBA8 (CtxRasterizer *rasterizer)
     {
       case CTX_SOURCE_TEXTURE:
       {
-        CtxBuffer *buffer = g->texture.buffer;
-        if (buffer)
-          buffer = buffer->color_managed?buffer->color_managed:buffer;
+#if CTX_ENABLE_CM
+         CtxBuffer *buffer = g->texture.buffer->color_managed?g->texture.buffer->color_managed:g->texture.buffer;
+#else
+         CtxBuffer *buffer = g->texture.buffer;
+#endif
+
         if (!buffer || !buffer->format)
           return ctx_fragment_color_RGBA8;
 
@@ -14708,11 +14758,15 @@ static CtxFragment ctx_rasterizer_get_fragment_RGBA8 (CtxRasterizer *rasterizer)
                             else if (extend == CTX_EXTEND_REPEAT)
                               return ctx_fragment_image_rgba8_RGBA8_nearest_copy_repeat_swap_red_green;
                           }
-                          return ctx_fragment_image_rgba8_RGBA8_bi_scale_swap_red_green;
+                          return gstate->global_alpha_u8==255?
+                              ctx_fragment_image_rgba8_RGBA8_bi_scale_swap_red_green
+                             :ctx_fragment_image_rgba8_RGBA8_bi_scale_with_alpha_swap_red_green;
                         }
-                        return ctx_fragment_image_rgba8_RGBA8_bi_affine_swap_red_green;
+                        return gstate->global_alpha_u8==255?
+                        ctx_fragment_image_rgba8_RGBA8_bi_affine_swap_red_green
+                        :ctx_fragment_image_rgba8_RGBA8_bi_affine_with_alpha_swap_red_green;
                       }
-                      return ctx_fragment_image_rgba8_RGBA8_bi_generic_swap_red_green;
+                        return ctx_fragment_image_rgba8_RGBA8_bi_generic_swap_red_green;
                     }
 
                     if (ctx_matrix_no_perspective (transform))
@@ -14729,11 +14783,15 @@ static CtxFragment ctx_rasterizer_get_fragment_RGBA8 (CtxRasterizer *rasterizer)
                           else if (extend == CTX_EXTEND_REPEAT)
                             return ctx_fragment_image_rgba8_RGBA8_nearest_copy_repeat;
                         }
-                        return ctx_fragment_image_rgba8_RGBA8_bi_scale;
+                        return gstate->global_alpha_u8==255?
+                               ctx_fragment_image_rgba8_RGBA8_bi_scale:
+                               ctx_fragment_image_rgba8_RGBA8_bi_scale_with_alpha;
                       }
-                      return ctx_fragment_image_rgba8_RGBA8_bi_affine;
+                      return gstate->global_alpha_u8==255?
+                        ctx_fragment_image_rgba8_RGBA8_bi_affine:
+                        ctx_fragment_image_rgba8_RGBA8_bi_affine_with_alpha;
                     }
-                    return ctx_fragment_image_rgba8_RGBA8_bi_generic;
+                      return ctx_fragment_image_rgba8_RGBA8_bi_generic;
                   }
                 }
                 else
@@ -14977,7 +15035,7 @@ ctx_u8_source_copy_normal_color (int components, CTX_COMPOSITE_ARGUMENTS)
   }
 }
 
-static inline void
+static CTX_INLINE void
 ctx_RGBA8_source_over_normal_buf (CTX_COMPOSITE_ARGUMENTS, uint8_t *tsrc)
 {
   while (count--)
@@ -15187,7 +15245,7 @@ ctx_u8_blend_normal (int components, uint8_t * __restrict__ dst, uint8_t *src, u
 }
 
 /* branchless 8bit add that maxes out at 255 */
-static inline uint8_t ctx_sadd8(uint8_t a, uint8_t b)
+static CTX_INLINE uint8_t ctx_sadd8(uint8_t a, uint8_t b)
 {
   uint16_t s = (uint16_t)a+b;
   return -(s>>8) | (uint8_t)s;
@@ -16667,7 +16725,11 @@ static void ctx_fragment_image_GRAYAF (CtxRasterizer *rasterizer, float x, float
   uint8_t rgba[4*count];
   float rgbaf[4*count];
   CtxSource *g = &rasterizer->state->gstate.source_fill;
-  CtxBuffer *buffer = g->texture.buffer->color_managed?g->texture.buffer->color_managed:g->texture.buffer;
+#if CTX_ENABLE_CM
+         CtxBuffer *buffer = g->texture.buffer->color_managed?g->texture.buffer->color_managed:g->texture.buffer;
+#else
+         CtxBuffer *buffer = g->texture.buffer;
+#endif
   switch (buffer->format->bpp)
     {
 #if CTX_FRAGMENT_SPECIALIZE
@@ -17787,7 +17849,11 @@ static void ctx_fragment_image_GRAYA8 (CtxRasterizer *rasterizer, float x, float
 {
   uint8_t rgba[4*count];
   CtxSource *g = &rasterizer->state->gstate.source_fill;
-  CtxBuffer *buffer = g->texture.buffer->color_managed?g->texture.buffer->color_managed:g->texture.buffer;
+#if CTX_ENABLE_CM
+         CtxBuffer *buffer = g->texture.buffer->color_managed?g->texture.buffer->color_managed:g->texture.buffer;
+#else
+         CtxBuffer *buffer = g->texture.buffer;
+#endif
   switch (buffer->format->bpp)
     {
 #if CTX_FRAGMENT_SPECIALIZE
@@ -18469,11 +18535,13 @@ static inline void ctx_RGBA8_image_rgba8_RGBA8_nearest_fill_rect_copy (CtxRaster
   unsigned int height = y1-y0+1;
 
   //CtxSource *g = &rasterizer->state->gstate.source_fill;
-  //CtxBuffer *buffer = g->texture.buffer->color_managed?g->texture.buffer->color_managed:g->texture.buffer;
 
   CtxSource *g = &rasterizer->state->gstate.source_fill;
-  CtxBuffer *buffer = 
-     g->texture.buffer->color_managed?g->texture.buffer->color_managed:g->texture.buffer;
+#if CTX_ENABLE_CM
+         CtxBuffer *buffer = g->texture.buffer->color_managed?g->texture.buffer->color_managed:g->texture.buffer;
+#else
+         CtxBuffer *buffer = g->texture.buffer;
+#endif
   int bwidth  = buffer->width;
   int bheight = buffer->height;
   int u = x0;// + 0.5f;
@@ -18527,7 +18595,7 @@ static inline void ctx_RGBA8_image_rgba8_RGBA8_nearest_fill_rect_copy (CtxRaster
 #endif
 
 
-static void
+static CTX_INLINE void
 ctx_composite_fill_rect_aligned (CtxRasterizer *rasterizer,
                                  int            x0,
                                  int            y0,
@@ -18563,16 +18631,13 @@ ctx_composite_fill_rect_aligned (CtxRasterizer *rasterizer,
   dst += (y0 - blit_y) * blit_stride; \
   dst += (x0 * rasterizer->format->bpp)/8;}while(0);
 
-//if (CTX_UNLIKELY(width <=0 || height <= 0))
-//  return;
   if (cov == 255)
   {
     switch (comp)
     {
     case CTX_COV_PATH_RGBA8_COPY:
     {
-      uint32_t color;
-      memcpy (&color, (uint32_t*)rasterizer->color, sizeof (color));
+      uint32_t color = ((uint32_t*)(rasterizer->color))[0];
       INIT_ENV;
       if (CTX_UNLIKELY(width == 1))
       {
@@ -18587,7 +18652,7 @@ ctx_composite_fill_rect_aligned (CtxRasterizer *rasterizer,
       {
         for (unsigned int y = y0; y <= (unsigned)y1; y++)
         {
-#if 0
+#if 1
           uint32_t *dst_pix = (uint32_t*)&dst[0];
           int count = width;
           while(count--)
@@ -18823,8 +18888,7 @@ y1, 0);
     {
     case CTX_COV_PATH_RGBA8_COPY:
     {
-      uint32_t color;
-      memcpy (&color, (uint32_t*)rasterizer->color, sizeof (color));
+      uint32_t color = ((uint32_t*)(rasterizer->color))[0];
       INIT_ENV;
       {
         for (unsigned int y = y0; y <= (unsigned)y1; y++)
@@ -18860,8 +18924,7 @@ y1, 0);
     }
     case CTX_COV_PATH_RGBA8_OVER:
     {
-      uint32_t color;
-      memcpy (&color, (uint32_t*)rasterizer->color, sizeof (color));
+      uint32_t color = ((uint32_t*)(rasterizer->color))[0];
       INIT_ENV;
       if (width == 1)
       {
@@ -19341,7 +19404,6 @@ const CtxPixelFormatInfo CTX_SIMD_SUFFIX(ctx_pixel_formats)[]=
 #endif // CTX_IMPLEMENTATION
 
 
-
 #ifndef __clang__
 #if CTX_RASTERIZER_O3
 #pragma GCC push_options
@@ -19361,7 +19423,7 @@ const CtxPixelFormatInfo CTX_SIMD_SUFFIX(ctx_pixel_formats)[]=
 
 
 
-static inline int ctx_compare_edges (const void *ap, const void *bp)
+static CTX_INLINE int ctx_compare_edges (const void *ap, const void *bp)
 {
   const CtxSegment *a = (const CtxSegment *) ap;
   const CtxSegment *b = (const CtxSegment *) bp;
@@ -19398,7 +19460,7 @@ static inline void ctx_edge_qsort (CtxSegment *entries, int low, int high)
     { ctx_edge_qsort (entries, p, high); }
 }
 
-static inline void ctx_rasterizer_discard_edges (CtxRasterizer *rasterizer)
+static CTX_INLINE void ctx_rasterizer_discard_edges (CtxRasterizer *rasterizer)
 {
   int scanline = rasterizer->scanline + 1;
   int next_scanline = scanline + CTX_FULL_AA;
@@ -19429,7 +19491,7 @@ static inline void ctx_rasterizer_discard_edges (CtxRasterizer *rasterizer)
   rasterizer->ending_edges = ending_edges;
 }
 
-inline static void ctx_rasterizer_increment_edges (CtxRasterizer *rasterizer, int count)
+CTX_INLINE static void ctx_rasterizer_increment_edges (CtxRasterizer *rasterizer, int count)
 {
   rasterizer->scanline += count;
   CtxSegment *__restrict__ segments = &((CtxSegment*)(rasterizer->edge_list.entries))[0];
@@ -19456,7 +19518,7 @@ inline static void ctx_rasterizer_increment_edges (CtxRasterizer *rasterizer, in
    again feed_edges until middle of scanline if doing non-AA
    or directly render when doing AA
 */
-inline static void ctx_edge2_insertion_sort (CtxSegment *segments, int *entries, unsigned int count)
+CTX_INLINE static void ctx_edge2_insertion_sort (CtxSegment *segments, int *entries, unsigned int count)
 {
   for(unsigned int i=1; i<count; i++)
    {
@@ -19471,7 +19533,7 @@ inline static void ctx_edge2_insertion_sort (CtxSegment *segments, int *entries,
    }
 }
 
-inline static void ctx_rasterizer_feed_edges (CtxRasterizer *rasterizer)
+CTX_INLINE static void ctx_rasterizer_feed_edges (CtxRasterizer *rasterizer)
 {
   CtxSegment *__restrict__ entries = (CtxSegment*)&rasterizer->edge_list.entries[0];
   int *edges = rasterizer->edges;
@@ -19817,8 +19879,7 @@ ctx_rasterizer_generate_coverage_apply (CtxRasterizer *rasterizer,
                                         int            maxx,
                //                       uint8_t* __restrict__ coverage,
                                         int            is_winding,
-                                        CtxCovPath     comp,
-                                        ctx_apply_coverage_fun apply_coverage)
+                                        CtxCovPath     comp)
 {
   CtxSegment *entries = (CtxSegment*)(&rasterizer->edge_list.entries[0]);
   uint8_t *rasterizer_src = rasterizer->color;
@@ -19908,7 +19969,7 @@ ctx_rasterizer_generate_coverage_apply (CtxRasterizer *rasterizer,
                   break;
 #endif
                 default:
-                  apply_coverage (rasterizer, (uint8_t*)dst_pix, rasterizer_src, accumulator_x, &accumulated, 1);
+                  rasterizer->apply_coverage (rasterizer, (uint8_t*)dst_pix, rasterizer_src, accumulator_x, &accumulated, 1);
               }
             }
             accumulated = 0;
@@ -19941,7 +20002,7 @@ ctx_rasterizer_generate_coverage_apply (CtxRasterizer *rasterizer,
             {
               uint8_t* dsts = (uint8_t*)(&dst[(first *bpp)/8]);
               uint8_t  startcov = graystart;
-              apply_coverage (rasterizer, (uint8_t*)dsts, rasterizer_src, first, &startcov, 1);
+              rasterizer->apply_coverage (rasterizer, (uint8_t*)dsts, rasterizer_src, first, &startcov, 1);
               uint8_t* dst_i = (uint8_t*)dsts;
               uint8_t *color = ((uint8_t*)&rasterizer->color_native);
               unsigned int bytes = bpp/8;
@@ -20018,7 +20079,7 @@ ctx_rasterizer_generate_coverage_apply (CtxRasterizer *rasterizer,
                 uint8_t* dstp = (uint8_t*)(&dst[(first *bpp)/8]);
                 uint8_t *srcp = (uint8_t*)src_pixp;
                 uint8_t  startcov = graystart;
-                apply_coverage (rasterizer, (uint8_t*)dstp, rasterizer_src, first, &startcov, 1);
+                rasterizer->apply_coverage (rasterizer, (uint8_t*)dstp, rasterizer_src, first, &startcov, 1);
                 dstp = (uint8_t*)(&dst[((first+1)*bpp)/8]);
                 unsigned int count = last - first - 1;
                 int val = srcp[0]/17;
@@ -20057,7 +20118,7 @@ ctx_rasterizer_generate_coverage_apply (CtxRasterizer *rasterizer,
                 uint8_t* dstp = (uint8_t*)(&dst[(first *bpp)/8]);
                 uint8_t *srcp = (uint8_t*)src_pixp;
                 uint8_t  startcov = graystart;
-                apply_coverage (rasterizer, (uint8_t*)dstp, rasterizer_src, first, &startcov, 1);
+                rasterizer->apply_coverage (rasterizer, (uint8_t*)dstp, rasterizer_src, first, &startcov, 1);
                 dstp = (uint8_t*)(&dst[((first+1)*bpp)/8]);
                 unsigned int count = last - first - 1;
                 int val = srcp[0]/85; 
@@ -20096,7 +20157,7 @@ ctx_rasterizer_generate_coverage_apply (CtxRasterizer *rasterizer,
                 uint8_t* dstp = (uint8_t*)(&dst[(first *bpp)/8]);
                 uint8_t *srcp = (uint8_t*)src_pixp;
                 uint8_t  startcov = graystart;
-                apply_coverage (rasterizer, (uint8_t*)dstp, rasterizer_src, first, &startcov, 1);
+                rasterizer->apply_coverage (rasterizer, (uint8_t*)dstp, rasterizer_src, first, &startcov, 1);
                 dstp = (uint8_t*)(&dst[((first+1)*bpp)/8]);
                 unsigned int count = last - first - 1;
                 if (srcp[0]>=127)
@@ -20197,7 +20258,7 @@ ctx_rasterizer_generate_coverage_apply (CtxRasterizer *rasterizer,
               memset (opaque, 255, sizeof (opaque));
 #endif
               opaque[0] = graystart;
-              apply_coverage (rasterizer,
+              rasterizer->apply_coverage (rasterizer,
                               &dst[(first * bpp)/8],
                               rasterizer_src, first, opaque, last-first);
 
@@ -20230,7 +20291,7 @@ ctx_rasterizer_generate_coverage_apply (CtxRasterizer *rasterizer,
          break;
 #endif
        default:
-         apply_coverage (rasterizer, (uint8_t*)dst_pix, rasterizer_src,
+         rasterizer->apply_coverage (rasterizer, (uint8_t*)dst_pix, rasterizer_src,
                          accumulator_x, &accumulated, 1);
      }
    }
@@ -20362,8 +20423,7 @@ ctx_rasterizer_generate_coverage_apply2 (CtxRasterizer *rasterizer,
                                          int            maxx,
                                          uint8_t       *coverage,
                                          int            is_winding,
-                                         CtxCovPath     comp,
-                                         ctx_apply_coverage_fun apply_coverage)
+                                         CtxCovPath     comp)
 {
   CtxSegment *entries = (CtxSegment*)(&rasterizer->edge_list.entries[0]);
   int *edges          = rasterizer->edges;
@@ -20522,7 +20582,7 @@ ctx_rasterizer_generate_coverage_apply2 (CtxRasterizer *rasterizer,
                   break;
 #endif
                 default:
-                apply_coverage (rasterizer,
+                rasterizer->apply_coverage (rasterizer,
                           &dst[((accumulated_x0) * bpp)/8],
                           rasterizer_src,
                           accumulated_x0,
@@ -20715,7 +20775,7 @@ ctx_rasterizer_generate_coverage_apply2 (CtxRasterizer *rasterizer,
                 uint8_t opaque[width];
                 memset (opaque, 255, sizeof (opaque));
 #endif
-                apply_coverage (rasterizer,
+                rasterizer->apply_coverage (rasterizer,
                             &dst[((first + pre) * bpp)/8],
                             rasterizer_src,
                             first + pre,
@@ -20762,7 +20822,7 @@ ctx_rasterizer_generate_coverage_apply2 (CtxRasterizer *rasterizer,
                   break;
 #endif
                 default:
-                apply_coverage (rasterizer,
+                rasterizer->apply_coverage (rasterizer,
                           &dst[((accumulated_x0) * bpp)/8],
                           rasterizer_src,
                           accumulated_x0,
@@ -20797,6 +20857,107 @@ ctx_rasterizer_reset (CtxRasterizer *rasterizer)
 
 
 static void
+ctx_rasterizer_rasterize_edges3 (CtxRasterizer *rasterizer, const int fill_rule)
+{
+	 // XXX : there is crashes in this - should be fixes as code paths are shared
+	 //  with actual code
+  rasterizer->pending_edges   =   
+  rasterizer->active_edges    =   0;
+  CtxGState     *gstate     = &rasterizer->state->gstate;
+  int       is_winding  = fill_rule == CTX_FILL_RULE_WINDING;
+  const int real_aa     = rasterizer->aa;
+  uint8_t  *dst         = ((uint8_t *) rasterizer->buf);
+  int       scan_start  = rasterizer->blit_y * CTX_FULL_AA;
+  int       scan_end    = scan_start + (rasterizer->blit_height - 1) * CTX_FULL_AA;
+  const int blit_width  = rasterizer->blit_width;
+  const int blit_max_x  = rasterizer->blit_x + blit_width;
+  int       minx        = rasterizer->col_min / CTX_SUBDIV - rasterizer->blit_x;
+  int       maxx        = (rasterizer->col_max + CTX_SUBDIV-1) / CTX_SUBDIV -
+                          rasterizer->blit_x;
+  const int blit_stride = rasterizer->blit_stride;
+
+  uint8_t *rasterizer_src = rasterizer->color;
+
+  if (maxx > blit_max_x - 1)
+    { maxx = blit_max_x - 1; }
+
+  minx = ctx_maxi (gstate->clip_min_x, minx);
+  maxx = ctx_mini (gstate->clip_max_x, maxx);
+  minx *= (minx>0);
+ 
+
+  int pixs = maxx - minx + 1;
+  uint8_t _coverage[pixs];
+  uint8_t *coverage = &_coverage[0];
+
+  rasterizer->scan_min -= (rasterizer->scan_min % CTX_FULL_AA);
+  {
+     if (rasterizer->scan_min > scan_start)
+       {
+          dst += (rasterizer->blit_stride * (rasterizer->scan_min-scan_start) / CTX_FULL_AA);
+          scan_start = rasterizer->scan_min;
+       }
+      scan_end = ctx_mini (rasterizer->scan_max, scan_end);
+  }
+
+  if (CTX_UNLIKELY(gstate->clip_min_y * CTX_FULL_AA > scan_start ))
+    { 
+       dst += (rasterizer->blit_stride * (gstate->clip_min_y * CTX_FULL_AA -scan_start) / CTX_FULL_AA);
+       scan_start = gstate->clip_min_y * CTX_FULL_AA; 
+    }
+  scan_end = ctx_mini (gstate->clip_max_y * CTX_FULL_AA, scan_end);
+  if (CTX_UNLIKELY((minx >= maxx) | (scan_start > scan_end) |
+      (scan_start > (rasterizer->blit_y + (rasterizer->blit_height-1)) * CTX_FULL_AA) |
+      (scan_end < (rasterizer->blit_y) * CTX_FULL_AA)))
+  { 
+    /* not affecting this rasterizers scanlines */
+    return;
+  }
+
+  ctx_edge_qsort ((CtxSegment*)& (rasterizer->edge_list.entries[0]), 0, rasterizer->edge_list.count-1);
+  rasterizer->scanline = scan_start;
+
+  for (; rasterizer->scanline <= scan_end;)
+    {
+      int aa = ctx_rasterizer_feed_edges_full (rasterizer);
+      if (aa >=0)
+        { /* level of oversampling based on lowest steepness edges */
+          if (aa > real_aa) aa = real_aa;
+	  if (aa == 0) aa = 15; // XXX might be horiz-edges speed sink
+          int scanline_increment = 15/aa;
+          memset (coverage, 0, pixs);
+          uint8_t fraction = 255/aa;
+          for (int i = 0; i < CTX_FULL_AA; i+= scanline_increment)
+          {
+            if (i) ctx_rasterizer_feed_edges (rasterizer);
+            ctx_edge2_insertion_sort ((CtxSegment*)rasterizer->edge_list.entries, rasterizer->edges, rasterizer->active_edges);
+            ctx_rasterizer_generate_coverage (rasterizer, minx, maxx, coverage, is_winding, aa, fraction);
+            ctx_rasterizer_increment_edges (rasterizer, scanline_increment);
+          }
+
+      ctx_coverage_post_process (rasterizer, minx, maxx, coverage - minx, NULL, NULL);
+      rasterizer->apply_coverage (rasterizer,
+                      &dst[(minx * rasterizer->format->bpp) /8],
+                      rasterizer_src,
+                      minx,
+                      coverage,
+                      pixs);
+      dst += blit_stride;
+
+        }
+      else
+        {
+          rasterizer->scanline += CTX_FULL_AA;
+          dst += blit_stride;
+        }
+  
+    }
+
+}
+
+
+
+static void
 ctx_rasterizer_rasterize_edges2 (CtxRasterizer *rasterizer, const int fill_rule)
 {
   rasterizer->pending_edges   =   
@@ -20815,7 +20976,6 @@ ctx_rasterizer_rasterize_edges2 (CtxRasterizer *rasterizer, const int fill_rule)
                           rasterizer->blit_x;
   const int blit_stride = rasterizer->blit_stride;
 
-  ctx_apply_coverage_fun apply_coverage = rasterizer->apply_coverage;
   uint8_t *rasterizer_src = rasterizer->color;
 
   if (maxx > blit_max_x - 1)
@@ -20884,7 +21044,7 @@ ctx_rasterizer_rasterize_edges2 (CtxRasterizer *rasterizer, const int fill_rule)
           memset (coverage, 0, pixs);
           if (allow_direct)
           {
-            ctx_rasterizer_generate_coverage_apply2 (rasterizer, minx, maxx, coverage, is_winding, comp, apply_coverage);
+            ctx_rasterizer_generate_coverage_apply2 (rasterizer, minx, maxx, coverage, is_winding, comp);
             ctx_rasterizer_increment_edges (rasterizer, CTX_AA_HALFSTEP);
     
             dst += blit_stride;
@@ -20903,7 +21063,7 @@ ctx_rasterizer_rasterize_edges2 (CtxRasterizer *rasterizer, const int fill_rule)
           if (allow_direct)
           { /* can generate with direct rendering to target (we're not using shape cache) */
     
-            ctx_rasterizer_generate_coverage_apply (rasterizer, minx, maxx, is_winding, comp, apply_coverage);
+            ctx_rasterizer_generate_coverage_apply (rasterizer, minx, maxx, is_winding, comp);
             ctx_rasterizer_increment_edges (rasterizer, CTX_AA_HALFSTEP);
     
             dst += blit_stride;
@@ -20935,7 +21095,7 @@ ctx_rasterizer_rasterize_edges2 (CtxRasterizer *rasterizer, const int fill_rule)
       }
   
       ctx_coverage_post_process (rasterizer, minx, maxx, coverage - minx, NULL, NULL);
-      apply_coverage (rasterizer,
+      rasterizer->apply_coverage (rasterizer,
                       &dst[(minx * rasterizer->format->bpp) /8],
                       rasterizer_src,
                       minx,
@@ -20964,7 +21124,7 @@ ctx_rasterizer_rasterize_edges2 (CtxRasterizer *rasterizer, const int fill_rule)
      dst = (uint8_t*)(rasterizer->buf) + rasterizer->blit_stride * (gscan_start / CTX_FULL_AA);
      for (rasterizer->scanline = gscan_start; rasterizer->scanline < scan_start;)
      {
-       apply_coverage (rasterizer,
+       rasterizer->apply_coverage (rasterizer,
                        &dst[ (startx * rasterizer->format->bpp) /8],
                        rasterizer_src, 0, nocoverage, clipw);
        rasterizer->scanline += CTX_FULL_AA;
@@ -20975,7 +21135,7 @@ ctx_rasterizer_rasterize_edges2 (CtxRasterizer *rasterizer, const int fill_rule)
      dst = (uint8_t*)(rasterizer->buf) + rasterizer->blit_stride * (scan_start / CTX_FULL_AA);
      for (rasterizer->scanline = scan_start; rasterizer->scanline < scan_end;)
      {
-       apply_coverage (rasterizer,
+       rasterizer->apply_coverage (rasterizer,
                        &dst[ (startx * rasterizer->format->bpp) /8],
                        rasterizer_src,
                        0,
@@ -20989,7 +21149,7 @@ ctx_rasterizer_rasterize_edges2 (CtxRasterizer *rasterizer, const int fill_rule)
      dst = (uint8_t*)(rasterizer->buf) + rasterizer->blit_stride * (scan_start / CTX_FULL_AA);
      for (rasterizer->scanline = scan_start; rasterizer->scanline < scan_end;)
      {
-       apply_coverage (rasterizer,
+       rasterizer->apply_coverage (rasterizer,
                        &dst[ (maxx * rasterizer->format->bpp) /8],
                        rasterizer_src, 0, nocoverage, endx-maxx);
 
@@ -21002,7 +21162,7 @@ ctx_rasterizer_rasterize_edges2 (CtxRasterizer *rasterizer, const int fill_rule)
      // XXX this crashes under valgrind/asan
      if(0)for (rasterizer->scanline = scan_end; rasterizer->scanline/CTX_FULL_AA < gscan_end-1;)
      {
-       apply_coverage (rasterizer,
+       rasterizer->apply_coverage (rasterizer,
                        &dst[ (startx * rasterizer->format->bpp) /8],
                        rasterizer_src,
                        0,
@@ -21179,7 +21339,7 @@ static void ctx_rasterizer_poly_to_edges (CtxRasterizer *rasterizer)
 
 static inline void ctx_rasterizer_finish_shape (CtxRasterizer *rasterizer)
 {
-  if (rasterizer->has_shape & rasterizer->has_prev)
+  if (rasterizer->has_shape & (rasterizer->has_prev>0))
     {
       ctx_rasterizer_line_to (rasterizer, rasterizer->first_x, rasterizer->first_y);
       rasterizer->has_prev = 0;
@@ -21195,10 +21355,10 @@ static inline void ctx_rasterizer_move_to (CtxRasterizer *rasterizer, float x, f
 {
   int tx = 0, ty = 0;
 
+  rasterizer->first_x  =
   rasterizer->x        = x;
+  rasterizer->first_y  =
   rasterizer->y        = y;
-  rasterizer->first_x  = x;
-  rasterizer->first_y  = y;
   rasterizer->has_prev = -1;
   _ctx_user_to_device_prepped (rasterizer->state, x,y, &tx, &ty);
 
@@ -21288,13 +21448,11 @@ ctx_rasterizer_bezier_divide (CtxRasterizer *rasterizer,
 {
   float t = (s + e) * 0.5f;
   float x, y;
-  float lx, ly, dx, dy;
+  float dx, dy;
   ctx_bezier_sample (ox, oy, x0, y0, x1, y1, x2, y2, t, &x, &y);
-  lx = ctx_lerpf (sx, ex, t);
-  ly = ctx_lerpf (sy, ey, t);
-  dx = lx - x;
-  dy = ly - y;
-  if ((iteration < 6) & ((dx*dx+dy*dy) > tolerance))
+  dx = (sx+ex)/2 - x;
+  dy = (sy+ey)/2 - y;
+  if ((iteration < 6) & (((long)dx*dx+dy*dy) > tolerance))
   {
     ctx_rasterizer_bezier_divide (rasterizer, ox, oy, x0, y0, x1, y1, x2, y2,
                                   sx, sy, x, y, s, t, iteration + 1,
@@ -21349,27 +21507,25 @@ ctx_rasterizer_bezier_divide_fixed (CtxRasterizer *rasterizer,
                                     int ex, int ey,
                                     int s,
                                     int e,
-                                    int iteration,
-                                    int tolerance)
+                                    int iteration, long int tolerance)
 {
   int t = (s + e) / 2;
   int x, y;
-  int lx, ly, dx, dy;
+  int dx, dy;
   ctx_bezier_sample_fixed (ox, oy, x0, y0, x1, y1, x2, y2, t, &x, &y);
-  lx = ctx_lerp_fixed (sx, ex, t);
-  ly = ctx_lerp_fixed (sy, ey, t);
-  dx = lx - x;
-  dy = ly - y;
-  if ((iteration < 6) & (((dx*dx+dy*dy))  > tolerance))
+  dx = (sx+ex)/2 - x;
+  dy = (sy+ey)/2 - y;
+
+  if ((iteration < 6) & (((long)dx*dx+dy*dy) > tolerance))
   {
     iteration++;
     ctx_rasterizer_bezier_divide_fixed (rasterizer, ox, oy, x0, y0, x1, y1, x2, y2,
-                                  sx, sy, x, y, s, t, iteration,
-                                  tolerance);
+                                  sx, sy, x, y, s, t, iteration, tolerance
+                                  );
     ctx_rasterizer_line_to_fixed (rasterizer, x, y);
     ctx_rasterizer_bezier_divide_fixed (rasterizer, ox, oy, x0, y0, x1, y1, x2, y2,
-                                  x, y, ex, ey, t, e, iteration,
-                                  tolerance);
+                                  x, y, ex, ey, t, e, iteration, tolerance
+                                  );
   }
 }
 
@@ -21379,23 +21535,21 @@ ctx_rasterizer_curve_to (CtxRasterizer *rasterizer,
                          float x1, float y1,
                          float x2, float y2)
 {
-#if CTX_32BIT_SEGMENTS
-  float tolerance = 0.4f/ctx_matrix_get_scale (&rasterizer->state->gstate.transform);
-#else
-  float tolerance = 0.5f/ctx_matrix_get_scale (&rasterizer->state->gstate.transform);
-#endif
   float ox = rasterizer->state->x;
   float oy = rasterizer->state->y;
 
-  tolerance = tolerance * tolerance;
+  float tolerance = 0.42f/ctx_matrix_get_scale (&rasterizer->state->gstate.transform);
 
 #if 1
+  tolerance *= CTX_FIX_SCALE;
+  tolerance *= tolerance;
   ctx_rasterizer_bezier_divide_fixed (rasterizer,
             (int)(ox * CTX_FIX_SCALE), (int)(oy * CTX_FIX_SCALE), (int)(x0 * CTX_FIX_SCALE), (int)(y0 * CTX_FIX_SCALE),
             (int)(x1 * CTX_FIX_SCALE), (int)(y1 * CTX_FIX_SCALE), (int)(x2 * CTX_FIX_SCALE), (int)(y2 * CTX_FIX_SCALE),
             (int)(ox * CTX_FIX_SCALE), (int)(oy * CTX_FIX_SCALE), (int)(x2 * CTX_FIX_SCALE), (int)(y2 * CTX_FIX_SCALE),
-            0, CTX_FIX_SCALE, 0, (int)(tolerance * CTX_FIX_SCALE * CTX_FIX_SCALE));
+            0, CTX_FIX_SCALE, 0, (long)tolerance);
 #else
+  tolerance *= tolerance;
   ctx_rasterizer_bezier_divide (rasterizer,
                                 ox, oy, x0, y0,
                                 x1, y1, x2, y2,
@@ -21516,11 +21670,13 @@ ctx_rasterizer_define_texture (CtxRasterizer *rasterizer,
                      */
 
   ctx_rasterizer_set_texture (rasterizer, eid, 0.0f, 0.0f);
+#if CTX_ENABLE_CM
   if (!rasterizer->state->gstate.source_fill.texture.buffer->color_managed)
   {
     _ctx_texture_prepare_color_management (rasterizer->state,
     rasterizer->state->gstate.source_fill.texture.buffer);
   }
+#endif
   _ctx_texture_unlock ();
 }
 
@@ -21934,8 +22090,8 @@ ctx_rasterizer_rectangle_reverse (CtxRasterizer *rasterizer,
 static void
 ctx_rasterizer_pset (CtxRasterizer *rasterizer, int x, int y, uint8_t cov)
 {
-  if (x <= 0 || y < 0 || x >= rasterizer->blit_width ||
-      y >= rasterizer->blit_height)
+  if ((x <= 0) | (y < 0) | (x >= rasterizer->blit_width) |
+      (y >= rasterizer->blit_height))
     { return; }
   uint8_t fg_color[4];
   ctx_color_get_rgba8 (rasterizer->state, &rasterizer->state->gstate.source_fill.color,
@@ -22174,13 +22330,13 @@ ctx_rasterizer_stroke (CtxRasterizer *rasterizer)
       CtxSegment *entry2 = &((CtxSegment*)rasterizer->edge_list.entries)[2];
       CtxSegment *entry3 = &((CtxSegment*)rasterizer->edge_list.entries)[3];
 
-      if (!rasterizer->state->gstate.clipped &&
-          (entry0->data.s16[2] == entry1->data.s16[2]) &&
-          (entry0->data.s16[3] == entry3->data.s16[3]) &&
-          (entry1->data.s16[3] == entry2->data.s16[3]) &&
+      if (!rasterizer->state->gstate.clipped &
+          (entry0->data.s16[2] == entry1->data.s16[2]) &
+          (entry0->data.s16[3] == entry3->data.s16[3]) &
+          (entry1->data.s16[3] == entry2->data.s16[3]) &
           (entry2->data.s16[2] == entry3->data.s16[2])
 #if CTX_ENABLE_SHADOW_BLUR
-           && !rasterizer->in_shadow
+           & !rasterizer->in_shadow
 #endif
          )
        {
@@ -22499,8 +22655,7 @@ ctx_rasterizer_clip_apply (CtxRasterizer *rasterizer,
 
 #if CTX_ENABLE_CLIP
 
-  if ((rasterizer->clip_rectangle==1
-       || !rasterizer->clip_buffer)
+  if (((rasterizer->clip_rectangle==1) | (!rasterizer->clip_buffer))
       )
   {
     if (count == 5)
@@ -22567,7 +22722,7 @@ ctx_rasterizer_clip_apply (CtxRasterizer *rasterizer,
   }
   rasterizer->clip_rectangle = 0;
 
-  if ((minx == maxx) || (miny == maxy)) // XXX : reset hack
+  if ((minx == maxx) | (miny == maxy)) // XXX : reset hack
   {
     ctx_rasterizer_clip_reset (rasterizer);
     return;//goto done;
@@ -23666,8 +23821,8 @@ ctx_set_antialias (Ctx *ctx, CtxAntialias antialias)
   ((CtxRasterizer*)(ctx->backend))->aa = 
      _ctx_antialias_to_aa (antialias);
   ((CtxRasterizer*)(ctx->backend))->fast_aa = 0;
-  if (antialias == CTX_ANTIALIAS_DEFAULT||
-      antialias == CTX_ANTIALIAS_FAST)
+  if ((antialias == CTX_ANTIALIAS_DEFAULT)|
+      (antialias == CTX_ANTIALIAS_FAST))
     ((CtxRasterizer*)(ctx->backend))->fast_aa = 1;
 }
 
@@ -23691,7 +23846,7 @@ ctx_rasterizer_init (CtxRasterizer *rasterizer, Ctx *ctx, Ctx *texture_source, C
   rasterizer->texture_source = texture_source?texture_source:ctx;
 
   rasterizer->aa          = _ctx_antialias_to_aa (antialias);
-  rasterizer->fast_aa = (antialias == CTX_ANTIALIAS_DEFAULT||antialias == CTX_ANTIALIAS_FAST);
+  rasterizer->fast_aa = ((antialias == CTX_ANTIALIAS_DEFAULT)|(antialias == CTX_ANTIALIAS_FAST));
   ctx_state_init (rasterizer->state);
   rasterizer->buf         = data;
   rasterizer->blit_x      = x;
@@ -31944,9 +32099,9 @@ ctx_iterator_next (CtxIterator *iterator)
 {
   CtxEntry *ret;
 #if CTX_BITPACK
-  int expand_bitpack = iterator->flags & CTX_ITERATOR_EXPAND_BITPACK;
+  int expand_bitpack = (iterator->flags & CTX_ITERATOR_EXPAND_BITPACK)!=0;
 again:
-  if (CTX_UNLIKELY(expand_bitpack && iterator->bitpack_length))
+  if (CTX_UNLIKELY(expand_bitpack & (iterator->bitpack_length!=0)))
     {
       ret = &iterator->bitpack_command[iterator->bitpack_pos];
       iterator->bitpack_pos += (ctx_conts_for_entry (ret) + 1);
@@ -31959,7 +32114,7 @@ again:
 #endif
   ret = _ctx_iterator_next (iterator);
 #if CTX_BITPACK
-  if (CTX_UNLIKELY(ret && expand_bitpack))
+  if (CTX_UNLIKELY((ret != NULL) & (expand_bitpack)))
     switch ((CtxCode)(ret->code))
       {
         case CTX_REL_CURVE_TO_REL_LINE_TO:
@@ -31969,7 +32124,7 @@ again:
           iterator->bitpack_command[2].code = CTX_CONT;
           iterator->bitpack_command[3].code = CTX_REL_LINE_TO;
           // 0.0 here is a common optimization - so check for it
-          if (ret->data.s8[6]== 0 && ret->data.s8[7] == 0)
+          if ((ret->data.s8[6]== 0) & (ret->data.s8[7] == 0))
             { iterator->bitpack_length = 3; }
           else
             iterator->bitpack_length          = 4;
@@ -32614,15 +32769,15 @@ ctx_drawlist_bitpack (CtxDrawlist *drawlist, unsigned int start_pos)
                                     to bitpack yet*/
     {
       CtxEntry *entry = &drawlist->entries[i];
-      if (entry[0].code == CTX_SET_RGBA_U8 &&
-          entry[1].code == CTX_MOVE_TO &&
-          entry[2].code == CTX_REL_LINE_TO &&
-          entry[3].code == CTX_REL_LINE_TO &&
-          entry[4].code == CTX_REL_LINE_TO &&
-          entry[5].code == CTX_REL_LINE_TO &&
-          entry[6].code == CTX_FILL &&
-          ctx_fabsf (entry[2].data.f[0] - 1.0f) < 0.02f &&
-          ctx_fabsf (entry[3].data.f[1] - 1.0f) < 0.02f)
+      if ((int)(entry[0].code == CTX_SET_RGBA_U8) &
+          (entry[1].code == CTX_MOVE_TO) &
+          (entry[2].code == CTX_REL_LINE_TO) &
+          (entry[3].code == CTX_REL_LINE_TO) &
+          (entry[4].code == CTX_REL_LINE_TO) &
+          (entry[5].code == CTX_REL_LINE_TO) &
+          (entry[6].code == CTX_FILL) &
+          (ctx_fabsf (entry[2].data.f[0] - 1.0f) < 0.02f) &
+          (ctx_fabsf (entry[3].data.f[1] - 1.0f) < 0.02f))
         {
           entry[0].code = CTX_SET_PIXEL;
           entry[0].data.u16[2] = entry[1].data.f[0];
@@ -32637,9 +32792,9 @@ ctx_drawlist_bitpack (CtxDrawlist *drawlist, unsigned int start_pos)
 #if 1
       else if (entry[0].code == CTX_REL_LINE_TO)
         {
-          if (entry[1].code == CTX_REL_LINE_TO &&
-              entry[2].code == CTX_REL_LINE_TO &&
-              entry[3].code == CTX_REL_LINE_TO)
+          if ((entry[1].code == CTX_REL_LINE_TO) &
+              (entry[2].code == CTX_REL_LINE_TO) &
+              (entry[3].code == CTX_REL_LINE_TO))
             {
               float max_dev = find_max_dev (entry, 4);
               if (max_dev < 114 / CTX_SUBDIV)
@@ -32663,9 +32818,9 @@ ctx_drawlist_bitpack (CtxDrawlist *drawlist, unsigned int start_pos)
                   entry[3].code = CTX_NOP;
                 }
             }
-          else if (entry[1].code == CTX_REL_LINE_TO &&
-                   entry[2].code == CTX_REL_LINE_TO &&
-                   entry[3].code == CTX_REL_LINE_TO)
+          else if ((entry[1].code == CTX_REL_LINE_TO) &
+                   (entry[2].code == CTX_REL_LINE_TO) &
+                   (entry[3].code == CTX_REL_LINE_TO))
             {
               float max_dev = find_max_dev (entry, 4);
               if (max_dev < 114 / CTX_SUBDIV)
@@ -36008,6 +36163,7 @@ static void ctx_buffer_deinit (CtxBuffer *buffer)
   buffer->data = NULL;
   buffer->free_func = NULL;
   buffer->user_data  = NULL;
+#if CTX_ENABLE_CM
   if (buffer->color_managed)
   {
     if (buffer->color_managed != buffer)
@@ -36016,6 +36172,7 @@ static void ctx_buffer_deinit (CtxBuffer *buffer)
     }
     buffer->color_managed = NULL;
   }
+#endif
 }
 
 void ctx_buffer_destroy (CtxBuffer *buffer)
@@ -36144,6 +36301,7 @@ void
 _ctx_texture_prepare_color_management (CtxState      *state,
                                        CtxBuffer     *buffer)
 {
+#if CTX_ENABLE_CM
 // _ctx_texture_lock ();
    switch (buffer->format->pixel_format)
    {
@@ -36188,6 +36346,7 @@ _ctx_texture_prepare_color_management (CtxState      *state,
      default:
        buffer->color_managed = buffer;
    }
+#endif
 //  _ctx_texture_unlock ();
 }
 
@@ -54966,18 +55125,6 @@ ctx_render_ctx (Ctx *ctx, Ctx *d_ctx)
 }
 
 void
-ctx_render_ctx2 (Ctx *ctx, Ctx *d_ctx)
-{
-  CtxIterator iterator;
-  CtxCommand *command;
-  d_ctx->bail = 0;
-  void  (*process)  (Ctx *ctx, CtxCommand *entry) = d_ctx->process;
-  ctx_iterator_init (&iterator, &ctx->drawlist, 0, 0);
-  while ( (command = (CtxCommand*)_ctx_iterator_next (&iterator) ) )
-    process (d_ctx, command);
-}
-
-void
 ctx_render_ctx_masked (Ctx *ctx, Ctx *d_ctx, uint32_t mask)
 {
   CtxIterator iterator;
@@ -61034,7 +61181,7 @@ qagain:
 #endif
                   }
 
-                if (!vt->ctxp)
+                //if (!vt->ctxp)
                 {
 
                 if (vt->ctxp)
