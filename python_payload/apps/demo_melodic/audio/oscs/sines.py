@@ -30,7 +30,7 @@ class sines_osc(bl00mbox.Patch):
         names = ["root", "oct", "fifth", "third"]
         for x in range(4):
             param = Parameter(
-                [self.plugins.mixer.signals.input_gain[x]],
+                self.plugins.mixer.signals.input_gain[x],
                 names[x],
                 0.5,
                 [0, 32767],

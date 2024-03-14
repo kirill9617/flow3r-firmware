@@ -9,6 +9,7 @@ class ColorTheme:
         self.alt = colours.hsv_to_rgb(*alt_hsv)
         self.hi = colours.hsv_to_rgb(*hi_hsv)
 
+
 colorthemes = {}
 colorthemes["standard"] = ColorTheme(
     [0, 0, 0],

@@ -1,6 +1,25 @@
 from . import *
 
 
+class Modulator:
+    def __init__(self, name, patch, signal_range=[-2048, 2048], feed_hook=None):
+        self.name = name
+        self.patch = patch
+        self.signal = patch.signals.modulation_output
+        self.output = 0
+        self.signal_range = signal_range
+        self.feed_hook = feed_hook
+
+    def feed(self, ins, delta_ms):
+        if self.feed_hook is not None:
+            self.feed_hook(ins, delta_ms)
+
+    def update(self):
+        self.output = (self.signal.value - self.signal_range[0]) / (
+            self.signal_range[1] - self.signal_range[0]
+        )
+
+
 def center_notch(val, deadzone=0.2):
     refval = (2 * val) - 1
     gain = 1 / (1 - deadzone)
@@ -15,18 +34,18 @@ class ParameterPage(Page):
     def __init__(self, name, patch=None):
         super().__init__(name)
         self.patch = patch
-        self.mod_source = 0
-        self.num_mod_sources = 2
 
     def delete(self):
         self.patch.delete()
         for param in self.params:
             param.delete()
 
-    def finalize(self, channel, lfo_signal, env_signals):
+    def finalize(self, channel, modulators):
         self.params = self.params[:4]
         for param in self.params:
-            param.finalize(channel, lfo_signal, env_signals)
+            param.finalize(channel, modulators)
+        self.num_mod_sources = len(modulators)
+        self.mod_source = 0
         self.finalized = True
 
     def get_settings(self):
@@ -58,10 +77,7 @@ class ParameterPage(Page):
                 if param.modulated:
                     if self.subwindow == 0:
                         param.norm = val
-                    elif self.mod_source == 0:
-                        param.env_norm = center_notch(val)
-                    elif self.mod_source == 1:
-                            param.lfo_norm = center_notch(val)
+                    param.set_modulator_norm(self.mod_source, center_notch(val))
                 else:
                     param.norm = val
         if self.toggle is not None:
@@ -74,7 +90,9 @@ class ParameterPage(Page):
             self.subwindow %= 1
         self.locked = bool(self.subwindow)
         if self.locked:
-            lr_dir = app.input.buttons.app.right.pressed - app.input.buttons.app.left.pressed
+            lr_dir = (
+                app.input.buttons.app.right.pressed - app.input.buttons.app.left.pressed
+            )
             if lr_dir:
                 self.full_redraw = True
                 self.mod_source = (self.mod_source + lr_dir) % self.num_mod_sources
@@ -101,15 +119,10 @@ class ParameterPage(Page):
                     if param.norm_changed:
                         param.norm_changed = False
                         redraw = 1
-                elif self.mod_source == 0:
-                    val = param.env_norm
-                    if param.env_norm_changed:
-                        param.env_norm_changed = False
-                        redraw = 1
-                elif self.mod_source == 1:
-                    val = param.lfo_norm
-                    if param.lfo_norm_changed:
-                        param.lfo_norm_changed = False
+                else:
+                    val = param.get_modulator_norm(self.mod_source)
+                    if param.mod_norm_changed[self.mod_source]:
+                        param.mod_norm_changed[self.mod_source] = False
                         redraw = 1
                 if self.full_redraw:
                     redraw = 0
@@ -188,7 +201,7 @@ class ToggleParameter:
 class Parameter:
     def __init__(
         self,
-        signals,
+        signal,
         name,
         default_norm,
         signal_range=[-32767, 32767],
@@ -209,28 +222,22 @@ class Parameter:
         self.signal_get_value = get_val
         self.signal_set_value = set_val
         self.signal_get_string = get_str
-        self._signals = signals
+        self._signal = signal
         self._mod_mixers = []
         self._mod_shifters = []
         self.name = name
         self.display_name = name
         self.modulated = modulated
         self.finalized = False
-        self.default_env_mod = 0.5
-        self.default_lfo_mod = 0.5
         self.default_norm = default_norm
 
         # seperate track keeping to avoid blm rounding errors
         self._thou = -1
-        self._lfo_thou = -1
-        self._env_thou = -1
         self.norm_changed = True
-        self.lfo_norm_changed = True
-        self.env_norm_changed = True
 
         self._output_min = signal_range[0]
         self._output_spread = signal_range[1] - signal_range[0]
-        self.set_unit_signal(signals[0], signal_range)
+        self.set_unit_signal(self._signal, signal_range)
 
     def set_unit_signal(self, signal, signal_range=[-32767, 32767]):
         self._signal_string_signal = signal
@@ -252,7 +259,7 @@ class Parameter:
         if self.default_norm is not None:
             return self._thou / 1000
         else:
-            return self._norm_from_signal(self._signals[0])
+            return self._norm_from_signal(self._signal)
 
     @norm.setter
     def norm(self, val):
@@ -261,56 +268,53 @@ class Parameter:
             self.norm_changed = True
             self._thou = intval
         val = self._norm_to_signal(val)
-        for signal in self._signals:
-            self.signal_set_value(signal, val)
+        self.signal_set_value(self._signal, val)
 
     @property
     def unit(self):
         return self.signal_get_string(self._signal_string_signal)
 
-    def _create_modulator(self, channel, lfo_signal, env_signals):
+    def _create_modulator(self, channel, modulators):
+        self._mod_thou = [-1] * len(modulators)
+        self.mod_norm_changed = [True] * len(modulators)
         range_shift = True
         if self._output_min == -32767 and self._output_spread == 65534:
             range_shift = False
-        for i, signal in enumerate(self._signals):
-            val = signal.value
-            mod_mixer = channel.new(bl00mbox.plugins.mixer, 3)
-            mod_shifter = None
-            if range_shift:
-                val = (val - self._output_min) / self._output_spread
-                val = (val * 64434) - 32767
-                mod_shifter = channel.new(bl00mbox.plugins.range_shifter)
-                mod_shifter.signals.input = mod_mixer.signals.output
-                mod_shifter.signals.output_range[0] = self._output_min
-                mod_shifter.signals.output_range[1] = (
-                    self._output_min + self._output_spread
-                )
-                mod_shifter.signals.output = signal
-                self._output_min = -32767
-                self._output_spread = 65534
-                mod_shifter.always_render = True
-                self._mod_shifters += [mod_shifter]
-            else:
-                mod_mixer.signals.output = signal
-                mod_mixer.always_render = True
-            mod_mixer.signals.gain.mult = 2
-            mod_mixer.signals.input[0] = val
-            self._signals[i] = mod_mixer.signals.input[0]
-            mod_mixer.signals.input[1] = lfo_signal
-            mod_mixer.signals.input[2] = env_signals[i]
-            mod_mixer.signals.input_gain[0].mult = 0.5
-            mod_mixer.signals.input_gain[1] = 0
-            mod_mixer.signals.input_gain[2] = 0
-            self._mod_mixers += [mod_mixer]
-            self.lfo_norm = self.default_lfo_mod
-            self.env_norm = self.default_env_mod
+        val = self._signal.value
+        mod_mixer = channel.new(bl00mbox.plugins.mixer, len(modulators) + 1)
+        mod_shifter = None
+        if range_shift:
+            val = (val - self._output_min) / self._output_spread
+            val = (val * 64434) - 32767
+            mod_shifter = channel.new(bl00mbox.plugins.range_shifter)
+            mod_shifter.signals.input = mod_mixer.signals.output
+            mod_shifter.signals.output_range[0] = self._output_min
+            mod_shifter.signals.output_range[1] = self._output_min + self._output_spread
+            mod_shifter.signals.output = self._signal
+            self._output_min = -32767
+            self._output_spread = 65534
+            mod_shifter.always_render = True
+            self._mod_shifters += [mod_shifter]
+        else:
+            mod_mixer.signals.output = self._signal
+            mod_mixer.always_render = True
+        mod_mixer.signals.gain.mult = 2
+        mod_mixer.signals.input[0] = val
+        self._signal = mod_mixer.signals.input[0]
+        for x in range(len(modulators)):
+            mod_mixer.signals.input[x + 1] = modulators[x].signal
+            mod_mixer.signals.input_gain[x + 1] = 0
+            self.set_modulator_norm(x, 0.5)
+        mod_mixer.signals.input_gain[0].mult = 0.5
+        self._mod_mixers += [mod_mixer]
 
-    def finalize(self, channel, lfo_signal, env_signals):
+    def finalize(self, channel, modulators):
         if self.finalized:
             return
         self.norm = self.default_norm
         if self.modulated:
-            self._create_modulator(channel, lfo_signal, env_signals)
+            self._modulators = modulators
+            self._create_modulator(channel, modulators)
         self.finalized = True
 
     def delete(self):
@@ -322,37 +326,19 @@ class Parameter:
         ret = [(m.signals.output.value + 32767) / 65534 for m in self._mod_mixers]
         return ret
 
-    @property
-    def lfo_norm(self):
-        return self._lfo_thou / 1000
+    def get_modulator_norm(self, modulator_index):
+        return self._mod_thou[modulator_index] / 1000
 
-    @lfo_norm.setter
-    def lfo_norm(self, val):
+    def set_modulator_norm(self, modulator_index, val):
         if self.modulated:
             intval = int(val * 1000)
-            if intval != self._lfo_thou:
-                self.lfo_norm_changed = True
-                self._lfo_thou = intval
+            if intval != self._mod_thou[modulator_index]:
+                self.mod_norm_changed[modulator_index] = True
+                self._mod_thou[modulator_index] = intval
             val = 2 * val - 1
             val = val * abs(val) * 32767
             for m in self._mod_mixers:
-                m.signals.input_gain[1].value = val
-
-    @property
-    def env_norm(self):
-        return self._env_thou / 1000
-
-    @env_norm.setter
-    def env_norm(self, val):
-        if self.modulated:
-            intval = int(val * 1000)
-            if intval != self._env_thou:
-                self.env_norm_changed = True
-                self._env_thou = intval
-            val = 2 * val - 1
-            val = val * abs(val) * 32767
-            for m in self._mod_mixers:
-                m.signals.input_gain[2].value = val
+                m.signals.input_gain[1 + modulator_index].value = val
 
     def get_settings(self):
         if not self.finalized:
@@ -360,8 +346,8 @@ class Parameter:
         settings = {}
         settings["val"] = self._thou
         if self.modulated:
-            settings["lfo"] = self._lfo_thou
-            settings["env"] = self._env_thou
+            for x, mod in enumerate(self._modulators):
+                settings[mod.name] = self._mod_thou[x]
         return settings
 
     def set_settings(self, settings):
@@ -369,11 +355,8 @@ class Parameter:
             return
         self.norm = settings["val"] / 1000
         if self.modulated:
-            if "lfo" in settings.keys():
-                self.lfo_norm = settings["lfo"] / 1000
-            else:
-                self.lfo_norm = 0.5
-            if "env" in settings.keys():
-                self.env_norm = settings["env"] / 1000
-            else:
-                self.env_norm = 0.5
+            for x, mod in enumerate(self._modulators):
+                if mod.name in settings.keys():
+                    self.set_modulator_norm(x, settings[mod.name] / 1000)
+                else:
+                    self.set_modulator_norm(x, 0.5)

@@ -36,36 +36,40 @@ class rand_lfo(bl00mbox.Patch):
         self.plugins.noise_shift.signals.input.freq = 1
         self.plugins.noise_vol.signals.input_gain[0] = 0
         # read only
-        self.signals.output = self.plugins.range.signals.output
+        self.signals.modulation_output = self.plugins.range.signals.output
 
     @staticmethod
     def get_speed_string(signal):
         val = signal.freq
         return f"{val:.2f}Hz"
 
-    def make_page(self, name = "lfo"):
+    def make_page(self, name="lfo"):
         page = ParameterPage(name, self)
-        param = Parameter([self.plugins.osc.signals.waveform], "wave", 0.33)
+        param = Parameter(self.plugins.osc.signals.waveform, "wave", 0.33)
         page.params += [param]
-        param = Parameter([self.plugins.osc.signals.morph], "morph", 0.50)
+        param = Parameter(self.plugins.osc.signals.morph, "morph", 0.50)
         page.params += [param]
         param = Parameter(
-            [self.plugins.noise_vol.signals.input_gain[0]],
+            self.plugins.noise_vol.signals.input_gain[0],
             "rng",
             0.41,
             [0, 768],
         )
         page.params += [param]
         param = Parameter(
-            [self.plugins.noise_shift.signals.input],
+            self.plugins.noise_shift.signals.input,
             "speed",
             0.65,
             [-10000, 6000],
         )
         param.signal_get_string = rand_lfo.get_speed_string
         page.params += [param]
-        page.scope_param = Parameter([self.signals.output], "", None, [-2048, 2048])
+        page.scope_param = Parameter(
+            self.signals.modulation_output, "", None, [-2048, 2048]
+        )
+
         return page
+
 
 class sensors(bl00mbox.Patch):
     def __init__(self, chan):
@@ -74,18 +78,26 @@ class sensors(bl00mbox.Patch):
         self.plugins.mixer.signals.gain.dB = 0
         self.plugins.mixer.signals.input[2] = -2048
         self.plugins.mixer.always_render = True
-        self.signals.output = self.plugins.mixer.signals.output
+        self.signals.modulation_output = self.plugins.mixer.signals.output
 
-    def make_page(self, name = "sensors"):
+    def make_page(self, name="sensors"):
         page = ParameterPage(name, self)
-        param = Parameter([self.plugins.mixer.signals.input_gain[0]], "tilt", 0.5, [-4096, 4096])
+        param = Parameter(
+            self.plugins.mixer.signals.input_gain[0], "tilt", 0.5, [-4096, 4096]
+        )
         page.params += [param]
-        param = Parameter([self.plugins.mixer.signals.input_gain[1]], "speed", 0.5, [-4096, 4096])
+        param = Parameter(
+            self.plugins.mixer.signals.input_gain[1], "speed", 0.5, [-4096, 4096]
+        )
         page.params += [param]
-        page.scope_param = Parameter([self.signals.output], "", None, [-2048, 2048])
+        page.scope_param = Parameter(
+            self.signals.modulation_output, "", None, [-2048, 2048]
+        )
         return page
 
-    def update_data(self, acc_vector):
+    def update_data(self, ins, delta_ms):
+        acc_vector = ins.imu.acc
+
         def inclination(vec):
             x, y, z = vec[0], vec[1], vec[2]
             if z > 0:
@@ -93,6 +105,7 @@ class sensors(bl00mbox.Patch):
             elif z < 0:
                 return math.tau / 2 + math.atan((((x**2) + (y**2)) ** 0.5) / z)
             return math.tau / 4
+
         def azimuth(vec):
             x, y, z = vec[0], vec[1], vec[2]
             if x > 0:
@@ -105,9 +118,11 @@ class sensors(bl00mbox.Patch):
             elif y < 0:
                 return -math.tau / 4
             return math.tau / 4
+
         self.plugins.mixer.signals.input[0] = inclination(acc_vector) * 4096 * 2
-        r = math.sqrt(sum([x*x for x in acc_vector]))
+        r = math.sqrt(sum([x * x for x in acc_vector]))
         self.plugins.mixer.signals.input[1] = (r - 9.81) * 256
+
 
 class env(bl00mbox.Patch):
     def __init__(self, chan):
@@ -115,35 +130,31 @@ class env(bl00mbox.Patch):
         self.plugins.env = self._channel.new(bl00mbox.plugins.env_adsr)
         self.plugins.env.always_render = True
         self.signals.trigger = self.plugins.env.signals.trigger
-        self.signals.envelope_data = self.plugins.env.signals.env_output
         self.signals.input = self.plugins.env.signals.input
         self.signals.output = self.plugins.env.signals.output
+        self.signals.modulation_output = self.plugins.env.signals.env_output
 
     @staticmethod
     def get_ms_string(signal):
         return str(int(signal.value)) + "ms"
 
-    def make_page(self, toggle=None, name="env"):
+    def make_page(self, name="env", toggle=None):
         page = ParameterPage(name)
         if toggle is not None:
             page.toggle = toggle
-        param = Parameter([self.plugins.env.signals.attack], "attack", 0.091, [0, 1000])
+        param = Parameter(self.plugins.env.signals.attack, "attack", 0.091, [0, 1000])
         param.signal_get_string = self.get_ms_string
         page.params += [param]
-        param = Parameter([self.plugins.env.signals.decay], "decay", 0.247, [0, 1000])
+        param = Parameter(self.plugins.env.signals.decay, "decay", 0.247, [0, 1000])
         param.signal_get_string = self.get_ms_string
         page.params += [param]
-        param = Parameter(
-            [self.plugins.env.signals.sustain], "sustain", 0.2, [0, 32767]
-        )
+        param = Parameter(self.plugins.env.signals.sustain, "sustain", 0.2, [0, 32767])
         page.params += [param]
-        param = Parameter(
-            [self.plugins.env.signals.release], "release", 0.236, [0, 1000]
-        )
+        param = Parameter(self.plugins.env.signals.release, "release", 0.236, [0, 1000])
         param.signal_get_string = self.get_ms_string
         page.params += [param]
         page.scope_param = Parameter(
-            [self.plugins.env.signals.env_output], "", None, [0, 4096]
+            self.signals.modulation_output, "", None, [0, 4096]
         )
         return page
 
@@ -189,10 +200,10 @@ class mix_env_filt(bl00mbox.Patch):
         self.signals.trigger = self.plugins.env.signals.trigger
 
         self.signals.output = self.plugins.tone.signals.output
-        self.signals.envelope_data = self.plugins.env.signals.envelope_data
+        self.signals.envelope_data = self.plugins.env.signals.modulation_output
 
-    def make_env_page(self, toggle=None):
-        return self.plugins.env.make_page(toggle, name="env")
+    def make_env_page(self, name="env", toggle=None):
+        return self.plugins.env.make_page(name, toggle)
 
     @staticmethod
     def set_dB_value(signal, val):
@@ -220,7 +231,7 @@ class mix_env_filt(bl00mbox.Patch):
         mix_params = []
         for x in range(2):
             param = Parameter(
-                [self.plugins.gain_curves[x].signals.input],
+                self.plugins.gain_curves[x].signals.input,
                 "osc" + str(x),
                 0.5,
                 [0, 32767],
@@ -231,11 +242,11 @@ class mix_env_filt(bl00mbox.Patch):
             mix_params += [param]
         page.params += [mix_params[0]]
         param = Parameter(
-            [self.plugins.tone.signals.cutoff], "hicut", 0.5, [23000, 29000]
+            self.plugins.tone.signals.cutoff, "hicut", 0.5, [23000, 29000]
         )
         param.signal_get_string = self.get_cutoff_string
         page.params += [param]
-        param = Parameter([self.plugins.thru.signals.input], "bend", 0.1)
+        param = Parameter(self.plugins.thru.signals.input, "bend", 0.1)
         page.params += [param]
         page.params += [mix_params[1]]
         return page
@@ -259,7 +270,7 @@ class mix_env_filt(bl00mbox.Patch):
     def make_filter_page(self):
         page = ParameterPage("filter")
         param = Parameter(
-            [self.plugins.filter.signals.cutoff],
+            self.plugins.filter.signals.cutoff,
             "cutoff",
             0.8,
             [13000, 26000],
@@ -270,7 +281,7 @@ class mix_env_filt(bl00mbox.Patch):
         param.modulated = True
         page.params += [param]
         param = Parameter(
-            [self.plugins.filter.signals.reso],
+            self.plugins.filter.signals.reso,
             "q",
             0.27,
             [2048, 4096 * 7.5],
@@ -278,11 +289,11 @@ class mix_env_filt(bl00mbox.Patch):
         param.signal_get_string = self.get_reso_string
         param.modulated = True
         page.params += [param]
-        param = Parameter([self.plugins.filter.signals.mode], "mode", 0.45)
+        param = Parameter(self.plugins.filter.signals.mode, "mode", 0.45)
         param.signal_get_string = self.get_mode_string
         param.modulated = True
         page.params += [param]
-        param = Parameter([self.plugins.filter.signals.mix], "mix", 1, [0, 32767])
+        param = Parameter(self.plugins.filter.signals.mix, "mix", 1, [0, 32767])
         param.modulated = True
         page.params += [param]
         return page

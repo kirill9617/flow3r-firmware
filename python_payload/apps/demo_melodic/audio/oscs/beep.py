@@ -54,14 +54,14 @@ class beep_osc(bl00mbox.Patch):
         page = ParameterPage(self.name, self)
         voices = len(self.plugins.oscs)
         param = Parameter(
-            [self.plugins.shift_range.signals.input],
+            self.plugins.shift_range.signals.input,
             "shift",
             0.2,
             modulated=True,
         )
         page.params += [param]
         param = Parameter(
-            [self.plugins.mixer.signals.gain],
+            self.plugins.mixer.signals.gain,
             "dist",
             0,
             [4096 / voices, 4096],
@@ -69,7 +69,7 @@ class beep_osc(bl00mbox.Patch):
         )
         page.params += [param]
         param = Parameter(
-            [self.plugins.detune_osc.signals.pitch],
+            self.plugins.detune_osc.signals.pitch,
             "detune",
             0.2,
             [-9000, 0],

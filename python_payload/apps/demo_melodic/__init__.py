@@ -7,7 +7,7 @@ import math, os, json, errno
 from .ui import colorthemes
 from .ui.pages.osc_page import OscPage
 from .ui.pages.scale_page import ScalePage
-from .ui.pages.synth import ToggleParameter
+from .ui.pages.synth import ToggleParameter, Modulator
 from .audio.synth import *
 from .helpers import *
 from .audio import oscs
@@ -84,8 +84,8 @@ class MelodicApp(Application):
             return
         if not self.enter_done and not self.mode_main:
             self.pages[self.active_page].full_redraw = True
-        self.env_value = self._signal_env.value / 4096
-        self.lfo_value = self._signal_lfo.value / 4096 + 0.5
+        for mod in self.modulators:
+            mod.update()
         if self.mode_main:
             self.draw_main(ctx)
             return
@@ -113,7 +113,10 @@ class MelodicApp(Application):
         lr_arrows = False
         if text is None:
             arrow = not sub
-            text = ["mods", "env", "lfo"][sub]
+            if sub:
+                text = self.modulators[sub - 1].name
+            else:
+                text = "mods"
             lr_arrows = not arrow
         if arrow:
             rad = 45
@@ -124,10 +127,8 @@ class MelodicApp(Application):
                 ctx.rgb(*self.cols.fg)
         else:
             ctx.rgb(*col)
-        if sub == 1:
-            rad = 40 + self.env_value * 10
-        if sub == 2:
-            rad = 40 + self.lfo_value * 10
+        if sub:
+            rad = 40 + self.modulators[sub - 1].output * 10
         ctx.arc(0, 150, rad, 0, math.tau, 1).fill()
         ctx.rgb(*self.cols.bg)
         ctx.text_align = ctx.CENTER
@@ -138,10 +139,10 @@ class MelodicApp(Application):
             ctx.rel_line_to(10, -5)
             ctx.stroke()
         if lr_arrows:
-            for i in [-1,1]:
+            for i in [-1, 1]:
                 ctx.move_to(63 * i, 86)
-                ctx.rel_line_to(5*i, 4)
-                ctx.rel_line_to(-5*i, 3)
+                ctx.rel_line_to(5 * i, 4)
+                ctx.rel_line_to(-5 * i, 3)
                 ctx.stroke()
         ctx.move_to(0, pos)
         ctx.text(text)
@@ -318,14 +319,14 @@ class MelodicApp(Application):
         ctx.rgb(*self.cols.fg)
         ctx.line_width = 35
         for i in range(10):
-            ctx.arc(0,0,pos[i],start[i],stop[i],0).stroke()
+            ctx.arc(0, 0, pos[i], start[i], stop[i], 0).stroke()
         ctx.line_width = 4
         ctx.rgb(*[x * 0.75 for x in self.cols.fg])
         for i in range(10):
-            ctx.arc(0,0,pos[i] - 26,start[i],stop[i],0).stroke()
+            ctx.arc(0, 0, pos[i] - 26, start[i], stop[i], 0).stroke()
         ctx.rgb(*[x * 0.5 for x in self.cols.fg])
         for i in range(10):
-            ctx.arc(0,0,pos[i] - 36,start[i],stop[i],0).stroke()
+            ctx.arc(0, 0, pos[i] - 36, start[i], stop[i], 0).stroke()
 
         ctx.rotate(-math.tau / 4)
         ctx.text_align = ctx.CENTER
@@ -372,7 +373,7 @@ class MelodicApp(Application):
             osc.signals.output = self.synth.signals.osc_input[slot]
             self.mixer_page.params[slot * 3].display_name = osc.name
             page = osc.make_page()
-            page.finalize(self.blm, self._signal_lfo, [self._signal_env])
+            page.finalize(self.blm, self.modulators)
             self.osc_pages[slot] = page
 
         pages = []
@@ -393,21 +394,10 @@ class MelodicApp(Application):
             self.synth.signals.trigger = self.poly_squeeze.signals.trigger_out[0]
             self.synth.signals.pitch = self.poly_squeeze.signals.pitch_out[0]
 
-            self.lfo = self.blm.new(rand_lfo)
-            self.mod_env = self.blm.new(env)
-            self.mod_env.always_render = True
-            self.mod_env.signals.trigger = self.poly_squeeze.signals.trigger_out[0]
-
-            self.lfo2 = self.blm.new(rand_lfo)
-            self.mod_env2 = self.blm.new(env)
-            self.mod_env2.always_render = True
-            self.mod_env2.signals.trigger = self.poly_squeeze.signals.trigger_out[0]
-
-            self.sensors = self.blm.new(sensors)
-
-            self._signal_lfo = self.lfo.signals.output
-            self._signal_env = self.synth.signals.envelope_data
-            self._signal_mod_env = self.mod_env.signals.envelope_data
+            mod_envs = [self.blm.new(env) for x in range(2)]
+            for mod_env in mod_envs:
+                mod_env.always_render = True
+                mod_env.signals.trigger = self.poly_squeeze.signals.trigger_out[0]
 
             self.mixer_page = self.synth.make_mixer_page()
 
@@ -415,18 +405,28 @@ class MelodicApp(Application):
             self.synth_pages += [self.synth.make_filter_page()]
             self.synth_pages += [self.synth.make_env_page(toggle=self.drone_toggle)]
 
-            mod_pages = []
-            mod_pages += [self.mod_env.make_page(name="env 1")]
-            mod_pages += [self.mod_env2.make_page(name="env 2")]
-            mod_pages += [self.lfo.make_page(name="lfo 1")]
-            mod_pages += [self.lfo2.make_page(name="lfo 2")]
-            mod_pages += [self.sensors.make_page(name="sensors")]
+            self.modulators = [
+                Modulator("lfo 1", self.blm.new(rand_lfo), signal_range=[-2048, 2048]),
+                Modulator("lfo 2", self.blm.new(rand_lfo), signal_range=[-2048, 2048]),
+                Modulator("env 1", mod_envs[0], signal_range=[0, 4096]),
+                Modulator("env 2", mod_envs[1], signal_range=[0, 4096]),
+            ]
+
+            sens = self.blm.new(sensors)
+
+            self.modulators += [
+                Modulator(
+                    "sensors", sens, signal_range=[0, 4096], feed_hook=sens.update_data
+                ),
+            ]
+
+            mod_pages = [mod.patch.make_page(mod.name) for mod in self.modulators]
             self.synth_pages += [MultiPage("mods", mod_pages)]
 
             self.osc_pages = [None, None]
 
             for page in self.synth_pages + [self.mixer_page]:
-                page.finalize(self.blm, self._signal_lfo, [self._signal_mod_env])
+                page.finalize(self.blm, self.modulators)
 
         self.scale_page = ScalePage()
         self.osc_page = OscPage(oscs.osc_list)
@@ -466,7 +466,7 @@ class MelodicApp(Application):
         if self.osc_pages[0] is None:
             self._build_osc(oscs.get_osc_by_name("acid"), 0)
         if self.osc_pages[1] is None:
-            self._build_osc(oscs.get_osc_by_name("dream_osc"), 1)
+            self._build_osc(oscs.get_osc_by_name("dream"), 1)
 
     def on_enter_done(self):
         self.enter_done = True
@@ -529,10 +529,12 @@ class MelodicApp(Application):
 
     def think(self, ins, delta_ms):
         super().think(ins, delta_ms)
-        self.sensors.update_data(ins.imu.acc)
 
         if self.blm is None:
             return
+
+        for mod in self.modulators:
+            mod.feed(ins, delta_ms)
 
         if self.mode_main:
             playable_petals = range(10)
@@ -582,7 +584,9 @@ class MelodicApp(Application):
                     self.poly_squeeze.signals.trigger_in[i].stop()
             self.drone_toggle.changed = False
 
-        lr_dir = self.input.buttons.app.right.pressed - self.input.buttons.app.left.pressed
+        lr_dir = (
+            self.input.buttons.app.right.pressed - self.input.buttons.app.left.pressed
+        )
         if lr_dir:
             if self.mode_main:
                 self.shift_playing_field_by_num_petals(4 * lr_dir)
@@ -629,10 +633,11 @@ class MelodicApp(Application):
             sound_settings[page.name] = page.get_settings()
         osc_settings = []
         for page in self.osc_pages:
-            settings = {}
-            settings["params"] = page.get_settings()
-            settings["type"] = page.patch.name
-            osc_settings += [settings]
+            if page is not None:
+                settings = {}
+                settings["params"] = page.get_settings()
+                settings["type"] = page.patch.name
+                osc_settings += [settings]
         sound_settings["oscs"] = osc_settings
         return sound_settings
 

@@ -54,7 +54,7 @@ class acid_osc(bl00mbox.Patch):
     def make_page(self):
         page = ParameterPage(self.name, self)
         param = Parameter(
-            [self.plugins.ranges[1].signals.input],
+            self.plugins.ranges[1].signals.input,
             "detune",
             0.15,
             modulated=True,
@@ -62,14 +62,14 @@ class acid_osc(bl00mbox.Patch):
         param.default_env_mod = 1
         page.params += [param]
         param = Parameter(
-            [self.plugins.ranges[0].signals.input],
+            self.plugins.ranges[0].signals.input,
             "wave",
             0.98,
             modulated=True,
         )
         page.params += [param]
         param = Parameter(
-            [self.plugins.mixer.signals.gain],
+            self.plugins.mixer.signals.gain,
             "dist",
             0.34,
             [367, 32767],
@@ -79,7 +79,7 @@ class acid_osc(bl00mbox.Patch):
         param.default_lfo_mod = 0.4
         page.params += [param]
         param = Parameter(
-            [self.plugins.mixer.signals.input_gain[3]],
+            self.plugins.mixer.signals.input_gain[3],
             "noise",
             0,
             [0, 9001],

@@ -54,7 +54,7 @@ class dream_osc(bl00mbox.Patch):
     def make_page(self):
         page = ParameterPage(self.name, self)
         param = Parameter(
-            [self.plugins.mixers[0].signals.input_gain[0]],
+            self.plugins.mixers[0].signals.input_gain[0],
             "shine",
             0.5,
             [4096 * 0.2, 4096],
@@ -62,14 +62,14 @@ class dream_osc(bl00mbox.Patch):
         )
         page.params += [param]
         param = Parameter(
-            [self.plugins.mix_ranges[0].signals.input],
+            self.plugins.mix_ranges[0].signals.input,
             "mix",
             0.5,
             modulated=True,
         )
         page.params += [param]
         param = Parameter(
-            [self.plugins.mixers[1].signals.input_gain[0]],
+            self.plugins.mixers[1].signals.input_gain[0],
             "shimmer",
             0.5,
             [4096 * 0.2, 4096],

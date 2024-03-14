@@ -53,7 +53,7 @@ class fm_osc(bl00mbox.Patch):
         for i in range(2):
             suffix = [" A", " B"][i]
             param = Parameter(
-                [self.plugins.mixers[i].signals.input_gain[0]],
+                self.plugins.mixers[i].signals.input_gain[0],
                 "depth" + suffix,
                 0.5,
                 [0, 4096],
@@ -61,7 +61,7 @@ class fm_osc(bl00mbox.Patch):
             )
             dparams += [param]
             param = Parameter(
-                [self.plugins.mp.signals.shift[i]],
+                self.plugins.mp.signals.shift[i],
                 "shift" + suffix,
                 0.5,
                 [100, self.max_mult * 100],
