@@ -17,7 +17,7 @@
 // would be more useful to start with the existing dynamic calibration data
 // tho :D
 
-#define TOP_PETAL_THRESHOLD 8000
+#define TOP_PETAL_THRESHOLD 15000
 #define BOTTOM_PETAL_THRESHOLD 12000
 #define PETAL_HYSTERESIS 1000
 
