@@ -4,6 +4,7 @@ import bl00mbox
 
 class Page:
     def __init__(self, name):
+        # TODO: clean up this mess
         self.name = name
         self.display_name = name
         self.params = []
@@ -16,6 +17,12 @@ class Page:
         self.reset_on_enter = True
         self.hide_footer = False
         self.hide_header = False
+        self.parent = None
+        self._prev_child = None
+        self._children = []
+        self._child_index = None
+        self.use_bottom_petals = True
+        self.ghost = False
 
     def think(self, ins, delta_ms, app):
         pass
@@ -24,20 +31,171 @@ class Page:
         pass
 
     def get_settings(self):
-        return None
+        settings = {}
+        for child in self.children:
+            settings[child.name] = child.get_settings()
+        return settings
 
     def set_settings(self, settings):
+        for child in self.children:
+            if child.name in settings.keys():
+                child.set_settings(settings[child.name])
+
+    def finalize(self, channel, modulators):
+        for child in self.children:
+            child.finalize(channel, modulators)
+
+    @property
+    def children(self):
+        return self._children
+    
+    @children.setter
+    def children(self, vals):
+        for x, child in enumerate(vals):
+            child.parent = self
+            child._child_index = x
+        self._children = vals
+
+    @property
+    def prev_child(self):
+        if self._prev_child is not None:
+            return self._prev_child
+        elif len(self.children):
+            return self.children[0]
+        else:
+            return None
+    
+    @prev_child.setter
+    def prev_child(self, val):
+        self._prev_child = val
+
+
+    def scroll_to_child(self, app, child_index = None):
+        scrolled = False
+        if child_index is not None and child_index < len(self.children):
+            candidate = self.children[child_index]
+        else:
+            candidate = self.prev_child
+        inspected = []
+        while candidate is not None or candidate in inspected:
+            inspected += [candidate]
+            if not candidate.ghost:
+                app.fg_page = candidate
+                scrolled = True
+                break
+            candidate = candidate.prev_child
+        return scrolled
+
+    def scroll_to_parent(self, app):
+        scrolled = False
+        prev_child = self
+        candidate = self.parent
+        inspected = []
+        while candidate is not None or candidate in inspected:
+            candidate.prev_child = prev_child
+            inspected += [candidate]
+            if not candidate.ghost:
+                app.fg_page = candidate
+                scrolled = True
+                break
+            prev_child = candidate
+            candidate = candidate.parent
+        return scrolled
+
+    def scroll_siblings(self, app, distance):
+        index = self._child_index + distance
+        index %= len(self.parent.children)
+        app.fg_page = self.parent.children[index]
+
+    def lr_press_event(self, app, lr):
+        # feel free to override if there's no siblings
+        self.scroll_siblings(app, lr)
+
+    def right_press_event(self, app):
+        self.lr_press_event(app, 1)
+
+    def left_press_event(self, app):
+        self.lr_press_event(app, -1)
+
+    def down_press_event(self, app):
+        # do not override pls~
+        if not self.scroll_to_parent(app):
+            self.scroll_to_child(app)
+
+    def petal_5_press_event(self, app):
+        self.subwindow += 1
+        self.full_redraw = True
+
+class PlayingPage(Page):
+    def __init__(self, name = "play"):
+        super().__init__(name)
+        self.use_bottom_petals = False
+
+    def right_press_event(self, app):
+        app.shift_playing_field_by_num_petals(4)
+        self.full_redraw = True
+
+    def left_press_event(self, app):
+        app.shift_playing_field_by_num_petals(-4)
+        self.full_redraw = True
+
+    def petal_5_press_event(self, app):
         pass
+
+    def draw(self, ctx, app):
+        if not self.full_redraw:
+            return
+        self.full_redraw = False
+        ctx.rgb(*app.cols.bg).rectangle(-120, -120, 240, 240).fill()
+        ctx.text_align = ctx.CENTER
+
+        pos = [x * 0.87 + 85 for x in app.scale]
+        start = [math.tau * (0.75 - 0.04 + i / 10) for i in range(10)]
+        stop = [math.tau * (0.75 + 0.04 + i / 10) for i in range(10)]
+
+        ctx.rgb(*app.cols.fg)
+        ctx.line_width = 35
+        for i in range(10):
+            ctx.arc(0, 0, pos[i], start[i], stop[i], 0).stroke()
+        ctx.line_width = 4
+        ctx.rgb(*[x * 0.75 for x in app.cols.fg])
+        for i in range(10):
+            ctx.arc(0, 0, pos[i] - 26, start[i], stop[i], 0).stroke()
+        ctx.rgb(*[x * 0.5 for x in app.cols.fg])
+        for i in range(10):
+            ctx.arc(0, 0, pos[i] - 36, start[i], stop[i], 0).stroke()
+
+        ctx.rotate(-math.tau / 4)
+        ctx.text_align = ctx.CENTER
+        ctx.font = "Arimo Bold"
+        ctx.font_size = 20
+        ctx.rgb(*app.cols.bg)
+        for i in range(10):
+            ctx.rgb(*app.cols.bg)
+            ctx.move_to(pos[i], 6)
+            note = bl00mbox.helpers.sct_to_note_name(app.scale[i] * 200 + 18367)
+            ctx.text(note[:-1])
+            ctx.rotate(math.tau / 10)
+
+        ctx.rotate(math.tau * (app.mid_point_petal + 4.5) / 10)
+        ctx.rgb(*app.cols.bg)
+        ctx.line_width = 8
+        ctx.move_to(0, 0)
+        ctx.line_to(120, 0).stroke()
+        ctx.rgb(*app.cols.hi)
+        ctx.line_width = 1
+        ctx.move_to(3, 0)
+        ctx.line_to(120, 0).stroke()
+
 
 
 class MultiPage(Page):
-    # TODO: get_settings, set_settings
     def __init__(self, name, subpages):
         super().__init__(name)
         self.subpages = subpages
         for subpage in self.subpages:
-            self.hide_footer = True
-            self.hide_header = True
+            subpage.hide_footer = True
+            subpage.hide_header = True
 
     def finalize(self, channel, modulators):
         for subpage in self.subpages:
@@ -71,6 +229,41 @@ class MultiPage(Page):
         app.draw_modulator_indicator(
             ctx, self.subpages[self.subwindow].name, col=app.cols.alt
         )
+
+class PageGroup(Page):
+    def __init__(self, name):
+        super().__init__(name)
+        self.ghost = True
+
+class SubMenuPage(Page):
+    def __init__(self, name):
+        super().__init__(name)
+        self.savepage = None
+
+    def petal_5_press_event(self, app):
+        pass
+
+    def think(self, ins, delta_ms, app):
+        for x in range(len(self.children)):
+            if app.input.captouch.petals[app.petal_index[x]].whole.pressed:
+                self.scroll_to_child(app, x)
+
+    def draw(self, ctx, app):
+        ctx.rgb(*app.cols.bg)
+        ctx.rectangle(-120,-120,240,240).fill()
+        app.draw_title(ctx, self.name)
+        if self.savepage is not None:
+            app.draw_modulator_indicator(ctx, "save/load", col=app.cols.fg, arrow=True)
+        ctx.save()
+        ctx.text_align = ctx.CENTER
+        ctx.font = "Arimo Bold"
+        ctx.font_size = 20
+        ctx.rgb(*app.cols.alt)
+        for x, s in enumerate(self.children):
+            phi = -math.tau*(x+1)/5
+            ctx.move_to(90 * math.sin(phi), 90 * math.cos(phi))
+            ctx.text(s.name)
+        ctx.restore()
 
 
 class SavePage(Page):

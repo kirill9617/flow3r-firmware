@@ -42,8 +42,6 @@ class MelodicApp(Application):
 
         self.scale = [0] * 10
         self.blm = None
-        self.mode_main = True
-        self.active_page = 0
 
         self.drone_toggle = ToggleParameter("drone")
 
@@ -55,6 +53,23 @@ class MelodicApp(Application):
         self._scale_setup_highlight = 0
         self._scale_setup_root = 0
         self._scale_setup_root_mode = False
+        self._fg_page = None
+        
+
+    @property
+    def fg_page(self):
+        return self._fg_page
+
+    @fg_page.setter
+    def fg_page(self, new_page):
+        if new_page is self._fg_page:
+            return
+        new_page.full_redraw = True
+        if new_page.use_bottom_petals and not self._fg_page.use_bottom_petals:
+            if not self.drone_toggle.value:
+                for i in range(1, 10, 2):
+                    self.poly_squeeze.signals.trigger_in[i].stop()
+        self._fg_page = new_page
 
     def base_scale_get_val_from_mod_index(self, index):
         o = index // len(self.base_scale)
@@ -82,14 +97,11 @@ class MelodicApp(Application):
     def draw(self, ctx):
         if self.blm is None:
             return
-        if not self.enter_done and not self.mode_main:
-            self.pages[self.active_page].full_redraw = True
+        if not self.enter_done:
+            self.fg_page.full_redraw = True
         for mod in self.modulators:
             mod.update()
-        if self.mode_main:
-            self.draw_main(ctx)
-            return
-        self.pages[self.active_page].draw(ctx, self)
+        self.fg_page.draw(ctx, self)
 
     def draw_title(self, ctx, name):
         ctx.save()
@@ -308,48 +320,6 @@ class MelodicApp(Application):
         ctx.arc(0, 0, 25, 0, math.tau, 1).stroke()
         ctx.restore()
 
-    def draw_main(self, ctx):
-        ctx.rgb(*self.cols.bg).rectangle(-120, -120, 240, 240).fill()
-        ctx.text_align = ctx.CENTER
-
-        pos = [x * 0.87 + 85 for x in self.scale]
-        start = [math.tau * (0.75 - 0.04 + i / 10) for i in range(10)]
-        stop = [math.tau * (0.75 + 0.04 + i / 10) for i in range(10)]
-
-        ctx.rgb(*self.cols.fg)
-        ctx.line_width = 35
-        for i in range(10):
-            ctx.arc(0, 0, pos[i], start[i], stop[i], 0).stroke()
-        ctx.line_width = 4
-        ctx.rgb(*[x * 0.75 for x in self.cols.fg])
-        for i in range(10):
-            ctx.arc(0, 0, pos[i] - 26, start[i], stop[i], 0).stroke()
-        ctx.rgb(*[x * 0.5 for x in self.cols.fg])
-        for i in range(10):
-            ctx.arc(0, 0, pos[i] - 36, start[i], stop[i], 0).stroke()
-
-        ctx.rotate(-math.tau / 4)
-        ctx.text_align = ctx.CENTER
-        ctx.font = "Arimo Bold"
-        ctx.font_size = 20
-        ctx.rgb(*self.cols.bg)
-        for i in range(10):
-            ctx.rgb(*self.cols.bg)
-            ctx.move_to(pos[i], 6)
-            note = bl00mbox.helpers.sct_to_note_name(self.scale[i] * 200 + 18367)
-            ctx.text(note[:-1])
-            ctx.rotate(math.tau / 10)
-
-        ctx.rotate(math.tau * (self.mid_point_petal + 4.5) / 10)
-        ctx.rgb(*self.cols.bg)
-        ctx.line_width = 8
-        ctx.move_to(0, 0)
-        ctx.line_to(120, 0).stroke()
-        ctx.rgb(*self.cols.hi)
-        ctx.line_width = 1
-        ctx.move_to(3, 0)
-        ctx.line_to(120, 0).stroke()
-
     def _build_osc(self, osc_target, slot):
         if self.blm is None:
             return
@@ -376,60 +346,75 @@ class MelodicApp(Application):
             page.finalize(self.blm, self.modulators)
             self.osc_pages[slot] = page
 
-        pages = []
-        pages += [self.scale_page] + [self.osc_page] + [self.mixer_page]
+        pages = [self.osc_selector_page] + [self.mixer_page] + [self.env_page]
         pages += [page for page in self.osc_pages if page is not None]
-        pages += self.synth_pages
-        self.pages = pages
-        print(self.blm)
+        self.oscs_page.children = pages
 
     def _build_synth(self):
-        if self.blm is None:
-            self.blm = bl00mbox.Channel("mono synth")
-            self.blm.volume = 13000
-            self.poly_squeeze = self.blm.new(bl00mbox.plugins.poly_squeeze, 1, 10)
+        if self.blm is not None:
+            return
+        
+        self.blm = bl00mbox.Channel("mono synth")
+        self.blm.volume = 13000
+        self.poly_squeeze = self.blm.new(bl00mbox.plugins.poly_squeeze, 1, 10)
 
-            self.synth = self.blm.new(mix_env_filt)
-            self.synth.signals.output = self.blm.mixer
-            self.synth.signals.trigger = self.poly_squeeze.signals.trigger_out[0]
-            self.synth.signals.pitch = self.poly_squeeze.signals.pitch_out[0]
+        self.synth = self.blm.new(mix_env_filt)
+        self.synth.signals.output = self.blm.mixer
+        self.synth.signals.trigger = self.poly_squeeze.signals.trigger_out[0]
+        self.synth.signals.pitch = self.poly_squeeze.signals.pitch_out[0]
 
-            mod_envs = [self.blm.new(env) for x in range(2)]
-            for mod_env in mod_envs:
-                mod_env.always_render = True
-                mod_env.signals.trigger = self.poly_squeeze.signals.trigger_out[0]
+        mod_envs = [self.blm.new(env) for x in range(2)]
+        for mod_env in mod_envs:
+            mod_env.always_render = True
+            mod_env.signals.trigger = self.poly_squeeze.signals.trigger_out[0]
 
-            self.mixer_page = self.synth.make_mixer_page()
+        self.mixer_page = self.synth.make_mixer_page()
 
-            self.synth_pages = []
-            self.synth_pages += [self.synth.make_filter_page()]
-            self.synth_pages += [self.synth.make_env_page(toggle=self.drone_toggle)]
+        self.filter_page = self.synth.make_filter_page()
+        self.env_page = self.synth.make_env_page(toggle=self.drone_toggle)
 
-            self.modulators = [
-                Modulator("lfo 1", self.blm.new(rand_lfo), signal_range=[-2048, 2048]),
-                Modulator("lfo 2", self.blm.new(rand_lfo), signal_range=[-2048, 2048]),
-                Modulator("env 1", mod_envs[0], signal_range=[0, 4096]),
-                Modulator("env 2", mod_envs[1], signal_range=[0, 4096]),
-            ]
+        self.modulators = [
+            Modulator("lfo 1", self.blm.new(rand_lfo), signal_range=[-2048, 2048]),
+            Modulator("lfo 2", self.blm.new(rand_lfo), signal_range=[-2048, 2048]),
+            Modulator("env 1", mod_envs[0], signal_range=[0, 4096]),
+            Modulator("env 2", mod_envs[1], signal_range=[0, 4096]),
+        ]
 
-            sens = self.blm.new(sensors)
+        sens = self.blm.new(sensors)
 
-            self.modulators += [
-                Modulator(
-                    "sensors", sens, signal_range=[0, 4096], feed_hook=sens.update_data
-                ),
-            ]
+        self.modulators += [
+            Modulator(
+                "sensors", sens, signal_range=[0, 4096], feed_hook=sens.update_data
+            ),
+        ]
 
-            mod_pages = [mod.patch.make_page(mod.name) for mod in self.modulators]
-            self.synth_pages += [MultiPage("mods", mod_pages)]
+        mod_pages = [mod.patch.make_page(mod.name) for mod in self.modulators]
 
-            self.osc_pages = [None, None]
+        self.osc_pages = [None, None]
 
-            for page in self.synth_pages + [self.mixer_page]:
-                page.finalize(self.blm, self.modulators)
+        for page in [self.filter_page, self.mixer_page, self.env_page]:
+            page.finalize(self.blm, self.modulators)
 
         self.scale_page = ScalePage()
-        self.osc_page = OscPage(oscs.osc_list)
+        self.osc_selector_page = OscPage(oscs.osc_list)
+
+        self.notes_page = SubMenuPage("notes")
+        self.sound_page = SubMenuPage("sounds")
+        self.oscs_page = PageGroup("oscs")
+        self.fx_page = self.filter_page
+        self.mods_page = PageGroup("mods")
+        self.play_page = PlayingPage()
+
+        pages = []
+        pages += [self.osc_selector_page] + [self.mixer_page]
+        pages += [page for page in self.osc_pages if page is not None]
+        self.oscs_page.children = pages
+        self.mods_page.children = mod_pages
+        self.notes_page.children = [self.scale_page, PageGroup("arp"), PageGroup("bend")]
+        self.sound_page.children = [self.oscs_page, self.fx_page, self.mods_page]
+        self.play_page.children = [self.notes_page, self.sound_page]
+        if self.fg_page is None:
+            self._fg_page = self.play_page
 
     def update_leds(self, init=False):
         norm = self.env_value / 2 + 0.5
@@ -459,8 +444,7 @@ class MelodicApp(Application):
         self.make_scale()
         self.update_leds(init=True)
         self.enter_done = False
-        if not self.mode_main:
-            self.pages[self.active_page].full_redraw = True
+        self.fg_page.full_redraw = True
         self.load_sound_settings("autosave.json")
         self.load_notes_settings("autosave.json")
         if self.osc_pages[0] is None:
@@ -535,30 +519,9 @@ class MelodicApp(Application):
 
         for mod in self.modulators:
             mod.feed(ins, delta_ms)
+        self.update_leds()
 
-        if self.mode_main:
-            playable_petals = range(10)
-        else:
-            playable_petals = range(0, 10, 2)
-
-        """
-        petals = []
-        for i in playable_petals:
-            if ins.captouch.petals[i].pressed:
-                petals += [i]
-        if (len(petals) == 1) and (not self.mid_point_lock):
-            delta = petals[0] - self.mid_point_petal
-            if delta > 4:
-                delta -= 10
-            if delta < -5:
-                delta += 10
-            if delta > 2:
-                self.shift_playing_field_by_num_petals(delta - 2)
-            if delta < -3:
-                self.shift_playing_field_by_num_petals(delta + 3)
-        """
-
-        for i in playable_petals:
+        for i in range(0, 10, 2 if self.fg_page.use_bottom_petals else 1):
             if self.input.captouch.petals[i].whole.pressed:
                 self.poly_squeeze.signals.pitch_in[i].tone = self.scale[i]
                 self.poly_squeeze.signals.trigger_in[i].start()
@@ -568,66 +531,49 @@ class MelodicApp(Application):
             ):
                 self.poly_squeeze.signals.trigger_in[i].stop()
 
-        self.update_leds()
-
-        if self.input.buttons.app.middle.pressed:
-            self.mode_main = not self.mode_main
-            if not self.mode_main:
-                self.pages[self.active_page].full_redraw = True
-                if not self.drone_toggle.value:
-                    for i in range(1, 10, 2):
-                        self.poly_squeeze.signals.trigger_in[i].stop()
-
         if self.drone_toggle.changed and not self.drone_toggle.value:
             for i in range(10):
                 if not ins.captouch.petals[i].pressed:
                     self.poly_squeeze.signals.trigger_in[i].stop()
             self.drone_toggle.changed = False
 
-        lr_dir = (
-            self.input.buttons.app.right.pressed - self.input.buttons.app.left.pressed
-        )
-        if lr_dir:
-            if self.mode_main:
-                self.shift_playing_field_by_num_petals(4 * lr_dir)
-            else:
-                if not self.pages[self.active_page].locked:
-                    self.active_page = (self.active_page + lr_dir) % len(self.pages)
-                    self.pages[self.active_page].full_redraw = True
-                    if self.pages[self.active_page].reset_on_enter:
-                        self.pages[self.active_page].subwindow = 0
+        if self.input.buttons.app.right.pressed:
+            self.fg_page.right_press_event(self)
+        if self.input.buttons.app.left.pressed:
+            self.fg_page.left_press_event(self)
+        if self.input.buttons.app.middle.pressed:
+            self.fg_page.down_press_event(self)
 
-        if self.mode_main:
-            return
+        if self.fg_page.use_bottom_petals:
+            tmp = ins.captouch.petals[5].pressed
+            if tmp != self.petal_val[5]:
+                if self.petal_val[5] == False:
+                    self.fg_page.petal_5_press_event(self)
+                self.petal_val[5] = tmp
 
-        for petal in [7, 9, 1, 3]:
-            petal_len = len(self.petal_val[petal])
-            if ins.captouch.petals[petal].pressed:
-                val = (ins.captouch.petals[petal].position[0] + 15000) / 34000
-                val = max(0, min(1, val))
-                if self.petal_val[petal][0] is None:
-                    for i in range(petal_len):
-                        self.petal_val[petal][i] = val
+        if self.fg_page.use_bottom_petals:
+            for petal in [7, 9, 1, 3]:
+                petal_len = len(self.petal_val[petal])
+                if ins.captouch.petals[petal].pressed:
+                    val = (ins.captouch.petals[petal].position[0] + 15000) / 34000
+                    val = max(0, min(1, val))
+                    if self.petal_val[petal][0] is None:
+                        for i in range(petal_len):
+                            self.petal_val[petal][i] = val
+                    else:
+                        for i in range(petal_len - 1):
+                            self.petal_val[petal][i] = self.petal_val[petal][i + 1]
+                        self.petal_val[petal][petal_len - 1] += (
+                            val - self.petal_val[petal][petal_len - 1]
+                        ) * 0.2
                 else:
-                    for i in range(petal_len - 1):
-                        self.petal_val[petal][i] = self.petal_val[petal][i + 1]
-                    self.petal_val[petal][petal_len - 1] += (
-                        val - self.petal_val[petal][petal_len - 1]
-                    ) * 0.2
-            else:
-                for i in range(petal_len):
-                    self.petal_val[petal][i] = None
+                    for i in range(petal_len):
+                        self.petal_val[petal][i] = None
 
-        tmp = ins.captouch.petals[5].pressed
-        if tmp != self.petal_val[5]:
-            if self.petal_val[5] == False:
-                self.pages[self.active_page].subwindow += 1
-                self.pages[self.active_page].full_redraw = True
-            self.petal_val[5] = tmp
-
-        self.pages[self.active_page].think(ins, delta_ms, self)
+        self.fg_page.think(ins, delta_ms, self)
 
     def get_sound_settings(self):
+        return {}
         sound_settings = {}
         for page in self.synth_pages + [self.mixer_page]:
             sound_settings[page.name] = page.get_settings()
@@ -642,6 +588,7 @@ class MelodicApp(Application):
         return sound_settings
 
     def get_notes_settings(self):
+        return {}
         notes_settings = {
             "base scale": self.base_scale,
             "mid point": self.mid_point,
@@ -650,6 +597,7 @@ class MelodicApp(Application):
         return notes_settings
 
     def set_sound_settings(self, settings):
+        return
         for page in self.synth_pages + [self.mixer_page]:
             if page.name in settings.keys():
                 page.set_settings(settings[page.name])
@@ -669,6 +617,7 @@ class MelodicApp(Application):
             print("no setting found for oscs")
 
     def set_notes_settings(self, settings):
+        return
         self.base_scale = settings["base scale"]
         self.mid_point = settings["mid point"]
         self.mid_point_petal = settings["mid point petal"]

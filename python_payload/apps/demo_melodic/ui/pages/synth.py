@@ -34,6 +34,7 @@ class ParameterPage(Page):
     def __init__(self, name, patch=None):
         super().__init__(name)
         self.patch = patch
+        self.modulated = False
 
     def delete(self):
         self.patch.delete()
@@ -44,6 +45,8 @@ class ParameterPage(Page):
         self.params = self.params[:4]
         for param in self.params:
             param.finalize(channel, modulators)
+            if param.modulated:
+                self.modulated = True
         self.num_mod_sources = len(modulators)
         self.mod_source = 0
         self.finalized = True
@@ -68,35 +71,33 @@ class ParameterPage(Page):
                 print(f"no setting found for {self.name}->{param.name}")
 
     def think(self, ins, delta_ms, app):
-        modulated = False
+        if app.input.captouch.petals[5].whole.pressed:
+            if self.toggle is not None:
+                self.toggle.value = not self.toggle.value
+                self.full_redraw = True
+            elif self.modulated:
+                self.subwindow += 1
+                self.subwindow %= 2
+                self.full_redraw = True
+
         for i, param in enumerate(self.params):
-            if param.modulated:
-                modulated = True
             val = app.petal_val[app.petal_index[i]][0]
             if val is not None:
-                if param.modulated:
-                    if self.subwindow == 0:
-                        param.norm = val
+                if param.modulated and self.subwindow:
                     param.set_modulator_norm(self.mod_source, center_notch(val))
                 else:
                     param.norm = val
-        if self.toggle is not None:
-            if self.subwindow > 0:
-                self.subwindow = 0
-                self.toggle.value = not self.toggle.value
-        elif modulated:
-            self.subwindow %= 2
-        else:
-            self.subwindow %= 1
-        self.locked = bool(self.subwindow)
-        if self.locked:
-            lr_dir = (
-                app.input.buttons.app.right.pressed - app.input.buttons.app.left.pressed
-            )
-            if lr_dir:
-                self.full_redraw = True
-                self.mod_source = (self.mod_source + lr_dir) % self.num_mod_sources
 
+    def petal_5_press_event(self, app):
+        pass
+
+    def lr_press_event(self, app, lr):
+        if self.subwindow == 0:
+            super().lr_press_event(app, lr)
+        else:
+            self.full_redraw = True
+            self.mod_source = (self.mod_source + lr) % self.num_mod_sources
+    
     def draw(self, ctx, app):
         # changed encoding a bit but didn't follow thru yet, will clean that up
         fakesubwindow = 0
