@@ -14,7 +14,6 @@ class Page:
         self.finalized = False
         self.full_redraw = True
         self.locked = False
-        self.reset_on_enter = True
         self.hide_footer = False
         self.hide_header = False
         self.parent = None
@@ -23,6 +22,8 @@ class Page:
         self._child_index = None
         self.use_bottom_petals = True
         self.ghost = False
+        self.loner = False
+        self.dummy = False
 
     def think(self, ins, delta_ms, app):
         pass
@@ -33,7 +34,9 @@ class Page:
     def get_settings(self):
         settings = {}
         for child in self.children:
-            settings[child.name] = child.get_settings()
+            s = child.get_settings()
+            if s:
+                settings[child.name] = s
         return settings
 
     def set_settings(self, settings):
@@ -48,7 +51,7 @@ class Page:
     @property
     def children(self):
         return self._children
-    
+
     @children.setter
     def children(self, vals):
         for x, child in enumerate(vals):
@@ -64,13 +67,12 @@ class Page:
             return self.children[0]
         else:
             return None
-    
+
     @prev_child.setter
     def prev_child(self, val):
         self._prev_child = val
 
-
-    def scroll_to_child(self, app, child_index = None):
+    def scroll_to_child(self, app, child_index=None):
         scrolled = False
         if child_index is not None and child_index < len(self.children):
             candidate = self.children[child_index]
@@ -103,8 +105,13 @@ class Page:
         return scrolled
 
     def scroll_siblings(self, app, distance):
+        if self.loner:
+            return
         index = self._child_index + distance
         index %= len(self.parent.children)
+        while self.parent.children[index].loner:
+            index += 1 if distance > 0 else -1
+            index %= len(self.parent.children)
         app.fg_page = self.parent.children[index]
 
     def lr_press_event(self, app, lr):
@@ -122,12 +129,9 @@ class Page:
         if not self.scroll_to_parent(app):
             self.scroll_to_child(app)
 
-    def petal_5_press_event(self, app):
-        self.subwindow += 1
-        self.full_redraw = True
 
 class PlayingPage(Page):
-    def __init__(self, name = "play"):
+    def __init__(self, name="play"):
         super().__init__(name)
         self.use_bottom_petals = False
 
@@ -138,9 +142,6 @@ class PlayingPage(Page):
     def left_press_event(self, app):
         app.shift_playing_field_by_num_petals(-4)
         self.full_redraw = True
-
-    def petal_5_press_event(self, app):
-        pass
 
     def draw(self, ctx, app):
         if not self.full_redraw:
@@ -188,85 +189,238 @@ class PlayingPage(Page):
         ctx.line_to(120, 0).stroke()
 
 
+class LonerPage(Page):
+    """cannot be rotated to or from"""
 
-class MultiPage(Page):
-    def __init__(self, name, subpages):
+    def __init__(self, name):
         super().__init__(name)
-        self.subpages = subpages
-        for subpage in self.subpages:
-            subpage.hide_footer = True
-            subpage.hide_header = True
+        self.loner = True
 
-    def finalize(self, channel, modulators):
-        for subpage in self.subpages:
-            subpage.finalize(channel, modulators)
 
-    def get_settings(self):
-        settings = {}
-        for subpage in self.subpages:
-            settings[subpage.name] = subpage.get_settings()
-        return settings
-
-    def set_settings(self, settings):
-        for subpage in self.subpages:
-            if subpage.name in settings.keys():
-                subpage.set_settings(settings[subpage.name])
-            else:
-                print(f"no settings found for {subpage.name}")
-
-    def think(self, ins, delta_ms, app):
-        self.subwindow %= len(self.subpages)
-        self.subpages[self.subwindow].think(ins, delta_ms, app)
-
-    def draw(self, ctx, app):
-        self.subwindow %= len(self.subpages)
-        if self.full_redraw:
-            for subpage in self.subpages:
-                subpage.full_redraw = True
-            self.full_redraw = False
-        self.subpages[self.subwindow].draw(ctx, app)
-        app.draw_title(ctx, self.name)
-        app.draw_modulator_indicator(
-            ctx, self.subpages[self.subwindow].name, col=app.cols.alt
-        )
-
-class PageGroup(Page):
+class GhostPage(LonerPage):
     def __init__(self, name):
         super().__init__(name)
         self.ghost = True
 
+    """cannot be navigated to"""
+
+    def draw(self, ctx, app):
+        if not self.full_redraw:
+            return
+        ctx.rgb(*app.cols.bg)
+        ctx.rectangle(-120, -120, 240, 240).fill()
+        app.draw_title(ctx, self.name)
+        ctx.font = "Arimo"
+        ctx.font_size = 18
+        ctx.rgb(*app.cols.alt)
+        ctx.text_align = ctx.CENTER
+        pos = -36
+        ctx.move_to(0, pos)
+        ctx.text("whoopsie!!")
+        pos += 18
+        ctx.move_to(0, pos)
+        ctx.text("this shouldn't happen :3")
+        pos += 18
+        ctx.move_to(0, pos)
+        ctx.text("page class:")
+        pos += 18
+        ctx.move_to(0, pos)
+        ctx.text(self.__class__.__name__)
+
+
+class DummyPage(GhostPage):
+    def __init__(self, name):
+        super().__init__(name)
+        self.dummy = True
+
+
+class PageGroup(GhostPage):
+    pass
+
+
+"""
+class AudioModulePageGroup(PageGroup):
+    def __init__(self, name, num_slots):
+        super().__init__(name)
+        self.slots = [None] * num_slots
+
+    @property
+    def selectpage(self):
+        return self._selectpage
+
+    @selectpage.setter
+    def selectpage(self, val):
+        self._savepage = val
+        self._update_children()
+
+    def _update_children(self):
+        self.children = self._savepage
+
+    def swap_module(self):
+        pass
+
+    def _build_osc(self, app, osc_target, slot):
+        if self.blm is None:
+            return
+        if slot > len(self.osc_pages):
+            return
+
+        if osc_target is None:
+            if self.osc_pages[slot] is not None:
+                self.osc_pages[slot].delete()
+            self.osc_pages[slot] = None
+            self.mixer_page.params[slot].name = "/"
+        else:
+            if self.osc_pages[slot] is None:
+                pass
+            elif isinstance(self.osc_pages[slot], osc_target):
+                return
+            else:
+                self.osc_pages[slot].delete()
+            osc = self.blm.new(osc_target)
+            osc.signals.pitch = self.synth.signals.osc_pitch[slot]
+            osc.signals.output = self.synth.signals.osc_input[slot]
+            self.mixer_page.params[slot * 3].display_name = osc.name
+            page = osc.make_page()
+            page.finalize(self.blm, self.modulators)
+            self.osc_pages[slot] = page
+
+        pages = [self.osc_selector_page] + [self.mixer_page] + [self.env_page]
+        pages += [page for page in self.osc_pages if page is not None]
+        self.oscs_page.children = pages
+"""
+
+
 class SubMenuPage(Page):
     def __init__(self, name):
         super().__init__(name)
-        self.savepage = None
+        self._savepage = None
+        self._menupages = []
 
-    def petal_5_press_event(self, app):
-        pass
+    def _update_children(self):
+        self.children = self.menupages + (
+            [self.savepage] if self.savepage is not None else []
+        )
+
+    @property
+    def savepage(self):
+        return self._savepage
+
+    @savepage.setter
+    def savepage(self, val):
+        self._savepage = val
+        self._update_children()
+
+    @property
+    def menupages(self):
+        return self._menupages
+
+    @menupages.setter
+    def menupages(self, val):
+        self._menupages = val
+        self._update_children()
 
     def think(self, ins, delta_ms, app):
-        for x in range(len(self.children)):
+        for x in range(len(self.menupages)):
             if app.input.captouch.petals[app.petal_index[x]].whole.pressed:
                 self.scroll_to_child(app, x)
+        if self.savepage is not None and app.input.captouch.petals[5].whole.pressed:
+            self.scroll_to_child(app, len(self.menupages))
+
+    def draw_grouplabel(self, ctx, app, petal, name):
+        labelsize = 18
+        barlen = 70
+        barstart = 40
+        rot = 0.75 + petal / 10
+        labelalign = ctx.LEFT
+        translate_center = 40 + 70 / 2
+        sign = 1
+        top = True
+        outshift = 10
+        trans_rot = 0
+        downshift = 0
+
+        if petal in [3, 7]:
+            trans_rot = -0.02
+            top = False
+        else:
+            trans_rot = 0.07
+            outshift += 10
+            # downshift = 5
+
+        if petal in [7, 9]:
+            labelalign = ctx.RIGHT
+            rot += 0.5
+            sign = -1
+
+        ctx.save()
+        ctx.translate(outshift * sign, downshift)
+        ctx.line_width = 3
+
+        ctx.rotate(math.tau * rot)
+
+        ctx.translate(translate_center * sign, 0)
+        ctx.rotate(math.tau * trans_rot * sign)
+        ctx.translate(-translate_center * sign, 0)
+
+        ctx.move_to(55 * sign, 0)
+        ctx.text_align = labelalign
+        ctx.font_size = labelsize
+        ctx.rgb(*app.cols.alt)
+        ctx.text(name)
+
+        def cool_triangle(xpos, ypos, length, width, backtilt, crop=0):
+            xpos = xpos + crop
+            lenght = xpos - crop
+            width
+            ctx.move_to(xpos * sign, ypos)
+            ctx.rel_line_to(-backtilt * sign, width)
+            ctx.rel_line_to((length + backtilt) * sign, -width)
+            ctx.rel_line_to(-length * sign, 0)
+            cool_draw()
+
+        ctx.line_width = 3
+        ctx.rgb(*app.cols.hi)
+        cool_draw = ctx.fill
+        s = 0
+        # cool_triangle(45 + s, 5, 65 - s, 17*(65-s)/65, 9*(65-s)/65)
+        ctx.rgb(*app.cols.bg)
+        s = 6
+        # cool_triangle(45 + s, 5, 65 - s, 17*(65-s)/65, 9*(65-s)/65)
+        ctx.rgb(*app.cols.alt)
+        # cool_triangle(50, -labelsize + 3, 45, -12, 5)
+        s = 12
+        # cool_triangle(45 + s, 5, 65*0.7 - s, 17*(65-s)/65, 9*(65-s)/65)
+        ctx.rgb(*app.cols.alt)
+        cool_draw = ctx.fill
+        cool_triangle(60, 11, 65 * 0.7, 17 * 0.7, 9 * 0.7)
+        cool_triangle(54, -labelsize - 2, 45 * 0.8, -12 * 0.8, 5 * 0.8)
+        ctx.rgb(*app.cols.fg)
+        cool_draw = ctx.stroke
+        cool_triangle(45, 5, 65, 17, 9)
+        cool_triangle(50, -labelsize + 3, 45, -12, 5)
+        ctx.restore()
 
     def draw(self, ctx, app):
+        if not self.full_redraw:
+            return
         ctx.rgb(*app.cols.bg)
-        ctx.rectangle(-120,-120,240,240).fill()
+        ctx.rectangle(-120, -120, 240, 240).fill()
         app.draw_title(ctx, self.name)
         if self.savepage is not None:
             app.draw_modulator_indicator(ctx, "save/load", col=app.cols.fg, arrow=True)
         ctx.save()
-        ctx.text_align = ctx.CENTER
         ctx.font = "Arimo Bold"
-        ctx.font_size = 20
-        ctx.rgb(*app.cols.alt)
-        for x, s in enumerate(self.children):
-            phi = -math.tau*(x+1)/5
-            ctx.move_to(90 * math.sin(phi), 90 * math.cos(phi))
-            ctx.text(s.name)
+        for x, page in enumerate(self.menupages):
+            if page.dummy:
+                ctx.global_alpha = 0.5
+            self.draw_grouplabel(ctx, app, app.petal_index[x], page.name)
+            ctx.global_alpha = 1
         ctx.restore()
+        self.full_redraw = False
 
 
-class SavePage(Page):
+class SavePage(LonerPage):
     def load(self, app):
         pass
 
@@ -282,9 +436,15 @@ class SavePage(Page):
     def load_files(self, app):
         pass
 
+    def lr_press_event(self, app, lr):
+        self._slot = (self._slot + lr) % self.num_slots
+        self.full_redraw = True
+        pass
+
     def __init__(self, name, slots):
         super().__init__(name)
         self.num_slots = slots
+        self.lr_dir = 0
         self.hold_time = 1500
         self._slot_content = [None] * self.num_slots
 
@@ -300,18 +460,6 @@ class SavePage(Page):
         return "slot" + str(num + 1) + ".json"
 
     def think(self, ins, delta_ms, app):
-        lr_dir = (
-            app.input.captouch.petals[3].whole.pressed
-            - app.input.captouch.petals[7].whole.pressed
-        )
-        if self.locked:
-            lr_dir += (
-                app.input.buttons.app.right.pressed - app.input.buttons.app.left.pressed
-            )
-        if lr_dir:
-            self._slot = (self._slot + lr_dir) % self.num_slots
-            self.full_redraw = True
-
         if ins.captouch.petals[1].pressed:
             if self._save_timer < self.hold_time:
                 self._save_timer += delta_ms
@@ -344,7 +492,10 @@ class SavePage(Page):
 
     def draw(self, ctx, app):
         if self.full_redraw:
-            app.draw_modulator_indicator(ctx, "save/load", col=app.cols.hi)
+            ctx.rgb(*app.cols.bg)
+            ctx.rectangle(-120, -120, 240, 240).fill()
+            app.draw_title(ctx, self.name)
+            # app.draw_modulator_indicator(ctx, "save/load", col=app.cols.hi)
         ctx.text_align = ctx.CENTER
         ctx.font = "Arimo Bold"
         ctx.save()

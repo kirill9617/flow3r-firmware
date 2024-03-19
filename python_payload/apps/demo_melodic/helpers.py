@@ -1,6 +1,10 @@
 import os
 
 
+def dicts_match_recursive(dict1, dict2):
+    return dict_contains_dict(dict1, dict2) and dict_contains_dict(dict2, dict1)
+
+
 def dict_contains_dict(container, containee):
     for key in containee:
         if key not in container:

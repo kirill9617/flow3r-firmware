@@ -88,16 +88,13 @@ class ParameterPage(Page):
                 else:
                     param.norm = val
 
-    def petal_5_press_event(self, app):
-        pass
-
     def lr_press_event(self, app, lr):
         if self.subwindow == 0:
             super().lr_press_event(app, lr)
         else:
             self.full_redraw = True
             self.mod_source = (self.mod_source + lr) % self.num_mod_sources
-    
+
     def draw(self, ctx, app):
         # changed encoding a bit but didn't follow thru yet, will clean that up
         fakesubwindow = 0
@@ -193,10 +190,13 @@ class ToggleParameter:
             self.full_redraw = True
 
     def get_settings(self):
-        return {"val": self.value}
+        return self.value
 
     def set_settings(self, settings):
-        self.value = settings["val"]
+        if type(settings) == dict:
+            self.value = settings["val"]
+        else:
+            self.value = val
 
 
 class Parameter:
@@ -330,9 +330,13 @@ class Parameter:
     def get_modulator_norm(self, modulator_index):
         return self._mod_thou[modulator_index] / 1000
 
-    def set_modulator_norm(self, modulator_index, val):
+    def set_modulator_norm(self, modulator_index, val, thou=False):
         if self.modulated:
-            intval = int(val * 1000)
+            if thou:
+                intval = int(val)
+                val /= 1000
+            else:
+                intval = int(val * 1000)
             if intval != self._mod_thou[modulator_index]:
                 self.mod_norm_changed[modulator_index] = True
                 self._mod_thou[modulator_index] = intval
@@ -346,18 +350,27 @@ class Parameter:
             return
         settings = {}
         settings["val"] = self._thou
+        modulated = False
         if self.modulated:
             for x, mod in enumerate(self._modulators):
-                settings[mod.name] = self._mod_thou[x]
-        return settings
+                a = self._mod_thou[x]
+                if a != 500:
+                    settings[mod.name] = a
+                    modulated = True
+        if modulated:
+            return settings
+        return self._thou
 
     def set_settings(self, settings):
         if not self.finalized:
             return
-        self.norm = settings["val"] / 1000
-        if self.modulated:
-            for x, mod in enumerate(self._modulators):
-                if mod.name in settings.keys():
-                    self.set_modulator_norm(x, settings[mod.name] / 1000)
-                else:
-                    self.set_modulator_norm(x, 0.5)
+        if type(settings) == dict:
+            self.norm = settings["val"] / 1000
+            if self.modulated:
+                for x, mod in enumerate(self._modulators):
+                    if mod.name in settings.keys():
+                        self.set_modulator_norm(x, settings[mod.name], thou=True)
+                    else:
+                        self.set_modulator_norm(x, 500, thou=True)
+        elif type(settings) == int or type(settings) == float:
+            self.norm = settings / 1000

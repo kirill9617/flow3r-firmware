@@ -1,13 +1,7 @@
 from . import *
 
 
-class OscPage(SavePage):
-    def __init__(self, osc_list):
-        super().__init__("sound", 5)
-
-        self._osc_type = [0, 0]
-        self.osc_list = osc_list
-
+class SoundSavePage(SavePage):
     def draw_saveslot(self, ctx, slot, geometry):
         xsize, ysize, center, yoffset = geometry
         names = self._slot_content[slot]
@@ -31,23 +25,29 @@ class OscPage(SavePage):
         app.delete_sound_settings(self.slotpath())
         print("sound deleted at " + self.slotpath())
 
+    def load_files(self, app):
+        for i in range(self.num_slots):
+            settings = app.load_sound_settings_file(self.slotpath(i))
+            if settings is None:
+                self._slot_content[i] = None
+            else:
+                if "oscs" in settings.keys():
+                    names = []
+                    for x, osc in enumerate(settings["oscs"]):
+                        names += [osc["type"]]
+                    self._slot_content[i] = names
+                else:
+                    self._slot_content[i] = ["???"]
+        self.full_redraw = True
+
+
+class OscSetupPage(Page):
+    def __init__(self, name, osc_list):
+        super().__init__(name)
+        self._osc_type = [0, 0]
+        self.osc_list = osc_list
+
     def think(self, ins, delta_ms, app):
-        self.subwindow %= 2
-        if self.subwindow == 0:
-            self.think_osc_setup(ins, delta_ms, app)
-        elif self.subwindow == 1:
-            super().think(ins, delta_ms, app)
-
-    def draw(self, ctx, app):
-        if self.full_redraw:
-            ctx.rgb(*app.cols.bg).rectangle(-120, -120, 240, 240).fill()
-            app.draw_title(ctx, self.display_name)
-        if self.subwindow == 0:
-            self.draw_osc_setup(ctx, app)
-        elif self.subwindow == 1:
-            super().draw(ctx, app)
-
-    def think_osc_setup(self, ins, delta_ms, app):
         for i in range(2):
             if app.osc_pages[i] is not None:
                 if self.osc_list[self._osc_type[i]] != type(app.osc_pages[i].patch):
@@ -61,8 +61,10 @@ class OscPage(SavePage):
                 )
                 app._build_osc(self.osc_list[self._osc_type[osc]], osc)
 
-    def draw_osc_setup(self, ctx, app):
-        app.draw_modulator_indicator(ctx, "save/load", col=app.cols.fg, arrow=True)
+    def draw(self, ctx, app):
+        ctx.rgb(*app.cols.bg).rectangle(-120, -120, 240, 240).fill()
+        app.draw_title(ctx, self.display_name)
+        # app.draw_modulator_indicator(ctx, "save/load", col=app.cols.fg, arrow=True)
         ctx.text_align = ctx.CENTER
         ctx.font = "Arimo Bold"
 
@@ -118,18 +120,3 @@ class OscPage(SavePage):
             ctx.rel_line_to(8, 0)
             ctx.rel_line_to(-4, -6)
             ctx.stroke()
-
-    def load_files(self, app):
-        for i in range(self.num_slots):
-            settings = app.load_sound_settings_file(self.slotpath(i))
-            if settings is None:
-                self._slot_content[i] = None
-            else:
-                if "oscs" in settings.keys():
-                    names = []
-                    for x, osc in enumerate(settings["oscs"]):
-                        names += [osc["type"]]
-                    self._slot_content[i] = names
-                else:
-                    self._slot_content[i] = ["???"]
-        self.full_redraw = True
