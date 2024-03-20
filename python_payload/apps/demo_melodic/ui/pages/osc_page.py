@@ -5,6 +5,8 @@ class SoundSavePage(SavePage):
     def draw_saveslot(self, ctx, slot, geometry):
         xsize, ysize, center, yoffset = geometry
         names = self._slot_content[slot]
+        if not names:
+            names = ["???"]
         names = names[:1] + ["x"] + names[1:]
         ctx.save()
         ctx.font_size = 16
@@ -31,92 +33,78 @@ class SoundSavePage(SavePage):
             if settings is None:
                 self._slot_content[i] = None
             else:
-                if "oscs" in settings.keys():
-                    names = []
-                    for x, osc in enumerate(settings["oscs"]):
-                        names += [osc["type"]]
-                    self._slot_content[i] = names
-                else:
-                    self._slot_content[i] = ["???"]
+                names = []
+                for y in ["oscs", "fx"]:
+                    for x in ["slot A", "slot B"]:
+                        if y in settings.keys():
+                            if x in settings[y].keys():
+                                names += [settings[y][x]["type"]]
+                self._slot_content[i] = names
         self.full_redraw = True
 
 
-class OscSetupPage(Page):
-    def __init__(self, name, osc_list):
-        super().__init__(name)
-        self._osc_type = [0, 0]
-        self.osc_list = osc_list
+class OscSelectPage(AudioModuleSelectPage):
+    def swap_module(self, app, module_target, slot):
+        if app.blm is None:
+            return
+        if slot > len(self.slot_pages):
+            return
 
-    def think(self, ins, delta_ms, app):
-        for i in range(2):
-            if app.osc_pages[i] is not None:
-                if self.osc_list[self._osc_type[i]] != type(app.osc_pages[i].patch):
-                    self._osc_type[i] = self.osc_list.index(
-                        type(app.osc_pages[i].patch)
-                    )
-        for osc, petal, plusminus in [[0, 7, 1], [0, 9, -1], [1, 3, 1], [1, 1, -1]]:
-            if app.input.captouch.petals[petal].whole.pressed:
-                self._osc_type[osc] = (self._osc_type[osc] + plusminus) % len(
-                    self.osc_list
-                )
-                app._build_osc(self.osc_list[self._osc_type[osc]], osc)
+        if module_target is None:
+            if self.slot_pages[slot] is not None:
+                self.slot_pages[slot].delete()
+                self.slot_pages[slot] = None
+        else:
+            if isinstance(self.slot_pages[slot], module_target):
+                return 
+            if self.slot_pages[slot] is not None:
+                self.slot_pages[slot].delete()
+            module = app.blm.new(module_target)
+            module.signals.pitch = app.synth.signals.osc_pitch[slot]
+            module.signals.output = app.synth.signals.osc_input[slot]
+            page = module.make_page()
+            page.finalize(app.blm, app.modulators)
+            self.slot_pages[slot] = page
 
-    def draw(self, ctx, app):
-        ctx.rgb(*app.cols.bg).rectangle(-120, -120, 240, 240).fill()
-        app.draw_title(ctx, self.display_name)
-        # app.draw_modulator_indicator(ctx, "save/load", col=app.cols.fg, arrow=True)
-        ctx.text_align = ctx.CENTER
-        ctx.font = "Arimo Bold"
+        if self.slot_pages[slot] is not None:
+            app.mixer_page.params[slot * 3].display_name = self.slot_pages[slot].name
+        else:
+            app.mixer_page.params[slot * 3].display_name = "(none)"
 
-        for k in range(2):
-            ctx.save()
-            x = (k * 2 - 1) * 65
-            y = -5
-            rot = (1 - k * 2) * 0.5 * math.tau / 60
-            ctx.translate(x, y)
-            ctx.rotate(rot)
-            ctx.translate(-x, -y)
-            for i in range(3):
-                j = (self._osc_type[k] + i - 1) % len(self.osc_list)
-                rot = (1 - k * 2) * (1 - i) * math.tau / 60
-                x = (k * 2 - 1) * 67
-                y = i * 40 - 52
-                ctx.font_size = 20
-                xsize = 80
-                ysize = 30
-                ctx.save()
-                if i != 1:
-                    ctx.font_size *= 0.8
-                    xsize *= 0.8
-                    ysize *= 0.8
-                    x *= 0.67
-                    ctx.global_alpha *= 0.8
-                ctx.translate(x, y)
-                ctx.rotate(rot)
-                ctx.translate(-x, -y)
-                ctx.line_width = 3
-                ctx.rgb(*app.cols.fg)
-                ctx.round_rectangle(
-                    x - xsize / 2, y - 5 - ysize / 2, xsize, ysize, 5
-                ).stroke()
-                ctx.rgb(*app.cols.alt)
-                ctx.move_to(x, y)
-                ctx.text(self.osc_list[j].name)
-                ctx.restore()
-            ctx.restore()
+class FxSelectPage(AudioModuleSelectPage):
+    def swap_module(self, app, module_target, slot):
+        if app.blm is None:
+            return
+        if slot > len(self.slot_pages):
+            return
 
-        ctx.rgb(*app.cols.hi)
+        if module_target is None:
+            if self.slot_pages[slot] is not None:
+                self.slot_pages[slot].delete()
+                self.slot_pages[slot] = None
+        else:
+            if isinstance(self.slot_pages[slot], module_target):
+                return 
+            if self.slot_pages[slot] is not None:
+                self.slot_pages[slot].delete()
+            module = app.blm.new(module_target)
+            module.signals.pitch = app.synth.signals.fx_send
+            module.signals.output = app.synth.signals.fx_return
+            page = module.make_page()
+            page.finalize(app.blm, app.modulators)
+            page.patch = module
+            self.slot_pages[slot] = page
+        # serial connection only for now
+        if self.slot_pages[0] is not None and self.slot_pages[1] is not None:
+            app.synth.signals.fx_send = self.slot_pages[0].patch.signals.input
+            self.slot_pages[0].patch.signals.output = self.slot_pages[1].patch.signals.input
+            app.synth.signals.fx_return = self.slot_pages[1].patch.signals.output
+        elif self.slot_pages[0] is not None:
+            app.synth.signals.fx_send = self.slot_pages[0].patch.signals.input
+            app.synth.signals.fx_return = self.slot_pages[0].patch.signals.output
+        elif self.slot_pages[1] is not None:
+            app.synth.signals.fx_send = self.slot_pages[1].patch.signals.input
+            app.synth.signals.fx_return = self.slot_pages[1].patch.signals.output
+        else:
+            app.synth.signals.fx_send = app.synth.signals.fx_return
 
-        # arrows
-        for sign in [-1, 1]:
-            ctx.move_to(100 * sign, 50)
-            ctx.rel_line_to(-4, -6)
-            ctx.rel_line_to(8, 0)
-            ctx.rel_line_to(-4, 6)
-            ctx.stroke()
-
-            ctx.move_to(70 * sign, -93)
-            ctx.rel_line_to(-4, 6)
-            ctx.rel_line_to(8, 0)
-            ctx.rel_line_to(-4, -6)
-            ctx.stroke()

@@ -238,11 +238,48 @@ class PageGroup(GhostPage):
     pass
 
 
-"""
 class AudioModulePageGroup(PageGroup):
-    def __init__(self, name, num_slots):
+    def __init__(self, name, app, selectpage, modulelist):
         super().__init__(name)
-        self.slots = [None] * num_slots
+        self._app = app
+        self._fixedpages = []
+        self._slotpages = [None, None]
+        self._selectpage = selectpage(name, modulelist)
+        self._update_children()
+
+    def get_settings(self):
+        settings = {}
+        for child in self._fixedpages:
+            s = child.get_settings()
+            if s:
+                settings[child.name] = s
+        for slot, slotlabel in [[0,"slot A"], [1, "slot B"]]:
+            if self._slotpages[slot] is not None:
+                s = {}
+                s["type"] = self._slotpages[slot].name
+                s["params"] = self._slotpages[slot].get_settings()
+                settings[slotlabel] = s
+        return settings
+
+    def set_settings(self, settings):
+        for child in self.fixedpages:
+            if child.name in settings.keys():
+                child.set_settings(settings[child.name])
+        for slot, slotlabel in [[0,"slot A"], [1, "slot B"]]:
+            sp = self._selectpage
+            if slotlabel in settings.keys():
+                s = {}
+                s["type"] = self._slotpages[slot].name
+                params = self._slotpages[slot].get_settings()
+                if a is not None:
+                    s["params"] = params
+                sp.swap_module(self._app, self.get_module_by_name(s["type"]), slot)
+                settings[slotlabel] = s
+            else:
+                sp.swap_module(self._app, None, slot)
+
+    def get_module_by_name(self, name):
+        return None
 
     @property
     def selectpage(self):
@@ -250,45 +287,125 @@ class AudioModulePageGroup(PageGroup):
 
     @selectpage.setter
     def selectpage(self, val):
-        self._savepage = val
+        self._selectpage = val
+        self._update_children()
+
+    @property
+    def slotpages(self):
+        return self._slotpages
+
+    @slotpages.setter
+    def slotpages(self, val):
+        self._slotpages = val
+        self._update_children()
+
+    @property
+    def fixedpages(self):
+        return self._fixedpages
+
+    @fixedpages.setter
+    def fixedpages(self, val):
+        self._fixedpages = val
         self._update_children()
 
     def _update_children(self):
-        self.children = self._savepage
+        pages = [self.selectpage] + self.slotpages + self.fixedpages
+        self.children = [page for page in pages if page is not None]
 
-    def swap_module(self):
-        pass
 
-    def _build_osc(self, app, osc_target, slot):
-        if self.blm is None:
-            return
-        if slot > len(self.osc_pages):
-            return
+class AudioModuleSelectPage(Page):
+    def __init__(self, name, module_list):
+        super().__init__(name)
+        self.module_list = module_list
+        self._module_type = [len(self.module_list)] * 2
+        self.slot_pages = [None, None]
 
-        if osc_target is None:
-            if self.osc_pages[slot] is not None:
-                self.osc_pages[slot].delete()
-            self.osc_pages[slot] = None
-            self.mixer_page.params[slot].name = "/"
-        else:
-            if self.osc_pages[slot] is None:
-                pass
-            elif isinstance(self.osc_pages[slot], osc_target):
-                return
+    def _update_parent(self):
+        self.parent.slotpages = self.slot_pages
+
+    def draw(self, ctx, app):
+        ctx.rgb(*app.cols.bg).rectangle(-120, -120, 240, 240).fill()
+        app.draw_title(ctx, self.display_name)
+        ctx.text_align = ctx.CENTER
+        ctx.font = "Arimo Bold"
+
+        for k in range(2):
+            ctx.save()
+            x = (k * 2 - 1) * 65
+            y = -5
+            rot = (1 - k * 2) * 0.5 * math.tau / 60
+            ctx.translate(x, y)
+            ctx.rotate(rot)
+            ctx.translate(-x, -y)
+            for i in range(3):
+                j = (self._module_type[k] + i - 1) % (len(self.module_list) + 1)
+                rot = (1 - k * 2) * (1 - i) * math.tau / 60
+                x = (k * 2 - 1) * 67
+                y = i * 40 - 52
+                ctx.font_size = 20
+                xsize = 80
+                ysize = 30
+                ctx.save()
+                if i != 1:
+                    ctx.font_size *= 0.8
+                    xsize *= 0.8
+                    ysize *= 0.8
+                    x *= 0.67
+                    ctx.global_alpha *= 0.8
+                ctx.translate(x, y)
+                ctx.rotate(rot)
+                ctx.translate(-x, -y)
+                ctx.line_width = 3
+                ctx.rgb(*app.cols.fg)
+                ctx.round_rectangle(
+                    x - xsize / 2, y - 5 - ysize / 2, xsize, ysize, 5
+                ).stroke()
+                ctx.rgb(*app.cols.alt)
+                ctx.move_to(x, y)
+                if j == len(self.module_list):
+                    ctx.text("(none)")
+                else:
+                    ctx.text(self.module_list[j].name)
+                ctx.restore()
+            ctx.restore()
+
+        ctx.rgb(*app.cols.hi)
+
+        # arrows
+        for sign in [-1, 1]:
+            ctx.move_to(100 * sign, 50)
+            ctx.rel_line_to(-4, -6)
+            ctx.rel_line_to(8, 0)
+            ctx.rel_line_to(-4, 6)
+            ctx.stroke()
+
+            ctx.move_to(70 * sign, -93)
+            ctx.rel_line_to(-4, 6)
+            ctx.rel_line_to(8, 0)
+            ctx.rel_line_to(-4, -6)
+            ctx.stroke()
+
+    def _update_module_type(self):
+        for i in range(2):
+            if self.slot_pages[i] is not None:
+                if self.module_list[self._module_type[i]] != type(self.slot_pages[i].patch):
+                    self._module_type[i] = self.module_list.index(
+                        type(self.slot_pages[i].patch)
+                    )
             else:
-                self.osc_pages[slot].delete()
-            osc = self.blm.new(osc_target)
-            osc.signals.pitch = self.synth.signals.osc_pitch[slot]
-            osc.signals.output = self.synth.signals.osc_input[slot]
-            self.mixer_page.params[slot * 3].display_name = osc.name
-            page = osc.make_page()
-            page.finalize(self.blm, self.modulators)
-            self.osc_pages[slot] = page
+                self._module_type[i] = len(self.module_list)
 
-        pages = [self.osc_selector_page] + [self.mixer_page] + [self.env_page]
-        pages += [page for page in self.osc_pages if page is not None]
-        self.oscs_page.children = pages
-"""
+    def think(self, ins, delta_ms, app):
+        for slot, petal, plusminus in [[0, 7, 1], [0, 9, -1], [1, 3, 1], [1, 1, -1]]:
+            if app.input.captouch.petals[petal].whole.pressed:
+                self._module_type[slot] += plusminus
+                self._module_type[slot] %= len(self.module_list) + 1
+                if self._module_type[slot] == len(self.module_list):
+                    self.swap_module(app, None, slot)
+                else:
+                    self.swap_module(app, self.module_list[self._module_type[slot]], slot)
+                self._update_parent()
+                self._update_module_type()
 
 
 class SubMenuPage(Page):

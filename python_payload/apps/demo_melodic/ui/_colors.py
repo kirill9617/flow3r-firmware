@@ -11,11 +11,18 @@ class ColorTheme:
 
 
 colorthemes = {}
-colorthemes["standard"] = ColorTheme(
+colorthemes["classic"] = ColorTheme(
     [0, 0, 0],
     [math.tau * 5 / 6, 1, 1],
     [math.tau * 3 / 6, 1, 1],
     [math.tau * 1 / 6, 1, 1],
+)
+
+colorthemes["mellow laserz"] = ColorTheme(
+    [0, 0, 0],
+    [math.tau * 5.2 / 6, 0.9, 1],
+    [math.tau * 3 / 6, 1, 1],
+    [math.tau * 0.8 / 6, 0.8, 0.9],
 )
 
 colorthemes["flow3r"] = ColorTheme(

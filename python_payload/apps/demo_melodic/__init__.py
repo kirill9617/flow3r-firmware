@@ -10,18 +10,17 @@ from .ui.pages.scale_page import *
 from .ui.pages.synth import ToggleParameter, Modulator
 from .audio.synth import *
 from .helpers import *
-from .audio import oscs
+from .audio import oscs, fx
 
 
 class MelodicApp(Application):
     def __init__(self, app_ctx) -> None:
         super().__init__(app_ctx)
 
-        self.cols = colorthemes["standard"]
+        self.cols = colorthemes["mellow laserz"]
 
         self.savefile_dir = "/sd/mono_synth"
 
-        self.synths = []
         self.base_scale = [0, 2, 3, 5, 7, 8, 10]
         self.mid_point_petal = 0
         self.mid_point_lock = True
@@ -320,6 +319,7 @@ class MelodicApp(Application):
         ctx.arc(0, 0, 25, 0, math.tau, 1).stroke()
         ctx.restore()
 
+    """
     def _build_osc(self, osc_target, slot):
         if self.blm is None:
             return
@@ -349,6 +349,7 @@ class MelodicApp(Application):
         pages = [self.osc_selector_page] + [self.mixer_page] + [self.env_page]
         pages += [page for page in self.osc_pages if page is not None]
         self.oscs_page.children = pages
+    """
 
     def _build_synth(self):
         if self.blm is not None:
@@ -358,7 +359,7 @@ class MelodicApp(Application):
         self.blm.volume = 13000
         self.poly_squeeze = self.blm.new(bl00mbox.plugins.poly_squeeze, 1, 10)
 
-        self.synth = self.blm.new(mix_env_filt)
+        self.synth = self.blm.new(mix_env)
         self.synth.signals.output = self.blm.mixer
         self.synth.signals.trigger = self.poly_squeeze.signals.trigger_out[0]
         self.synth.signals.pitch = self.poly_squeeze.signals.pitch_out[0]
@@ -370,7 +371,6 @@ class MelodicApp(Application):
 
         self.mixer_page = self.synth.make_mixer_page()
 
-        self.filter_page = self.synth.make_filter_page()
         self.env_page = self.synth.make_env_page(toggle=self.drone_toggle)
 
         self.modulators = [
@@ -392,31 +392,27 @@ class MelodicApp(Application):
 
         self.osc_pages = [None, None]
 
-        for page in [self.filter_page, self.mixer_page, self.env_page] + mod_pages:
+        for page in [self.mixer_page, self.env_page] + mod_pages:
             page.finalize(self.blm, self.modulators)
 
         self.scale_page = ScaleSetupPage("scale")
-        self.osc_selector_page = OscSetupPage("oscs", oscs.osc_list)
 
         self.notes_page = SubMenuPage("notes")
         self.sound_page = SubMenuPage("sounds")
         self.config_page = SubMenuPage("config")
-        self.oscs_page = PageGroup("oscs")
-        self.fx_page = PageGroup("fx")
+        self.oscs_page = AudioModulePageGroup("oscs", self, OscSelectPage, oscs.osc_list)
+        self.fx_page = AudioModulePageGroup("fx", self, FxSelectPage, fx.fx_list)
+        self.dyna_page = PageGroup("dyna")
         self.mods_page = PageGroup("mods")
         self.play_page = PlayingPage()
 
-        pages = []
-        pages += [self.osc_selector_page] + [self.mixer_page]
-        pages += [page for page in self.osc_pages if page is not None]
-        self.fx_page.children = [self.filter_page]
-        self.oscs_page.children = pages
         self.mods_page.children = mod_pages
+        self.dyna_page.children = [self.mixer_page] + [self.env_page]
         self.sound_page.menupages = [
             self.oscs_page,
             self.fx_page,
-            DummyPage("nya"),
             self.mods_page,
+            self.dyna_page,
         ]
         self.sound_page.savepage = SoundSavePage("sound", 5)
         self.notes_page.menupages = [
@@ -433,7 +429,7 @@ class MelodicApp(Application):
             DummyPage("???"),
         ]
 
-        self.play_page.children = [self.notes_page, self.sound_page, self.config_page]
+        self.play_page.children = [self.notes_page, self.sound_page]
         if self.fg_page is None:
             self._fg_page = self.play_page
 
@@ -460,13 +456,17 @@ class MelodicApp(Application):
         self.enter_done = False
         self.pages = []
         oscs.update_oscs("/flash/sys/apps/demo_melodic")
+        fx.update_fx("/flash/sys/apps/demo_melodic")
         self._build_synth()
-        self.load_sound_settings("autosave.json")
-        self.load_notes_settings("autosave.json")
+        
+        #self.load_sound_settings("autosave.json")
+        #self.load_notes_settings("autosave.json")
+        """
         if self.osc_pages[0] is None:
             self._build_osc(oscs.get_osc_by_name("acid"), 0)
         if self.osc_pages[1] is None:
             self._build_osc(oscs.get_osc_by_name("dream"), 1)
+        """
         self.fg_page.full_redraw = True
         self.update_leds(init=True)
         self.make_scale()
@@ -653,6 +653,7 @@ class MelodicApp(Application):
 
     def save_sound_settings(self, filename):
         settings = self.get_sound_settings()
+        print(settings)
         old_settings = self.load_sound_settings_file(filename)
         if old_settings is not None:
             if dicts_match_recursive(old_settings, settings):

@@ -159,7 +159,7 @@ class env(bl00mbox.Patch):
         return page
 
 
-class mix_env_filt(bl00mbox.Patch):
+class mix_env(bl00mbox.Patch):
     def __init__(self, chan):
         super().__init__(chan)
 
@@ -183,11 +183,9 @@ class mix_env_filt(bl00mbox.Patch):
         self.plugins.env.signals.input = self.plugins.mixer.signals.output
 
         self.plugins.filter = self._channel.new(bl00mbox.plugins.filter)
-        self.plugins.filter.signals.input = self.plugins.env.signals.output
 
         self.plugins.dist = self._channel.new(bl00mbox.plugins.distortion)
         self.plugins.dist.curve_set_power(3)
-        self.plugins.dist.signals.input = self.plugins.filter.signals.output
 
         self.plugins.tone = self._channel.new(bl00mbox.plugins.filter)
         self.plugins.tone.signals.input = self.plugins.dist.signals.output
@@ -198,6 +196,9 @@ class mix_env_filt(bl00mbox.Patch):
 
         self.signals.pitch = self.plugins.mp.signals.input
         self.signals.trigger = self.plugins.env.signals.trigger
+        self.signals.fx_send = self.plugins.env.signals.output
+        self.signals.fx_return = self.plugins.dist.signals.input
+        self.signals.fx_send = self.signals.fx_return
 
         self.signals.output = self.plugins.tone.signals.output
         self.signals.envelope_data = self.plugins.env.signals.modulation_output
@@ -226,6 +227,10 @@ class mix_env_filt(bl00mbox.Patch):
             return "mute"
         return str(int(signal.dB)) + "dB"
 
+    @staticmethod
+    def get_cutoff_string(signal):
+        return str(int(signal.freq)) + "Hz"
+
     def make_mixer_page(self):
         page = ParameterPage("mixer")
         mix_params = []
@@ -249,51 +254,4 @@ class mix_env_filt(bl00mbox.Patch):
         param = Parameter(self.plugins.thru.signals.input, "bend", 0.1)
         page.params += [param]
         page.params += [mix_params[1]]
-        return page
-
-    @staticmethod
-    def get_cutoff_string(signal):
-        return str(int(signal.freq)) + "Hz"
-
-    @staticmethod
-    def get_reso_string(signal):
-        val = signal.value / 4096
-        return f"{val:.2f}Q"
-
-    @staticmethod
-    def get_mode_string(signal):
-        val = signal.value
-        val = ((val / 65534) * 8 + 5) // 2
-        val = min(val, 4)
-        return ["lp", "lp+bp", "bp", "bp+hp", "hp"][int(val)]
-
-    def make_filter_page(self):
-        page = ParameterPage("filter")
-        param = Parameter(
-            self.plugins.filter.signals.cutoff,
-            "cutoff",
-            0.8,
-            [13000, 26000],
-        )
-        param.signal_get_string = self.get_cutoff_string
-        param.default_env_mod = 0.1
-        param.default_lfo_mod = 0.45
-        param.modulated = True
-        page.params += [param]
-        param = Parameter(
-            self.plugins.filter.signals.reso,
-            "q",
-            0.27,
-            [2048, 4096 * 7.5],
-        )
-        param.signal_get_string = self.get_reso_string
-        param.modulated = True
-        page.params += [param]
-        param = Parameter(self.plugins.filter.signals.mode, "mode", 0.45)
-        param.signal_get_string = self.get_mode_string
-        param.modulated = True
-        page.params += [param]
-        param = Parameter(self.plugins.filter.signals.mix, "mix", 1, [0, 32767])
-        param.modulated = True
-        page.params += [param]
         return page
