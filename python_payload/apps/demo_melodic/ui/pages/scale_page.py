@@ -31,14 +31,13 @@ class NotesSavePage(SavePage):
         app.delete_notes_settings(self.slotpath())
         print("notes deleted at " + self.slotpath())
 
-    def load_files(self, app):
+    def load_slot_content(self, app):
         for i in range(self.num_slots):
             settings = app.load_notes_settings_file(self.slotpath(i))
             if settings is None or "base scale" not in settings.keys():
                 self._slot_content[i] = None
             else:
                 self._slot_content[i] = list(settings["base scale"])
-        self.full_redraw = True
 
 
 class ScaleSetupPage(Page):

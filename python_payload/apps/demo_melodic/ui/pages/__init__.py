@@ -239,12 +239,11 @@ class PageGroup(GhostPage):
 
 
 class AudioModulePageGroup(PageGroup):
-    def __init__(self, name, app, selectpage, modulelist):
+    def __init__(self, name, app, selectpage, collection):
         super().__init__(name)
-        self._app = app
         self._fixedpages = []
         self._slotpages = [None, None]
-        self._selectpage = selectpage(name, modulelist)
+        self._selectpage = selectpage(name, app, collection)
         self._update_children()
 
     def get_settings(self):
@@ -268,13 +267,9 @@ class AudioModulePageGroup(PageGroup):
         for slot, slotlabel in [[0,"slot A"], [1, "slot B"]]:
             sp = self._selectpage
             if slotlabel in settings.keys():
-                s = {}
-                s["type"] = self._slotpages[slot].name
+                module_type = self._slotpages[slot].name
                 params = self._slotpages[slot].get_settings()
-                if a is not None:
-                    s["params"] = params
-                sp.swap_module(self._app, self.get_module_by_name(s["type"]), slot)
-                settings[slotlabel] = s
+                sp.swap_module(self._app, self.get_module_by_name(module_type), slot)
             else:
                 sp.swap_module(self._app, None, slot)
 
@@ -314,14 +309,20 @@ class AudioModulePageGroup(PageGroup):
 
 
 class AudioModuleSelectPage(Page):
-    def __init__(self, name, module_list):
+    def __init__(self, name, app, collection):
         super().__init__(name)
-        self.module_list = module_list
+        collection.update()
+        self.collection = collection
+        self.module_list = collection.module_list
         self._module_type = [len(self.module_list)] * 2
         self.slot_pages = [None, None]
+        self._app = app
 
     def _update_parent(self):
         self.parent.slotpages = self.slot_pages
+
+    def swap_module(self, app, module, slot):
+        pass
 
     def draw(self, ctx, app):
         ctx.rgb(*app.cols.bg).rectangle(-120, -120, 240, 240).fill()
@@ -389,6 +390,8 @@ class AudioModuleSelectPage(Page):
         for i in range(2):
             if self.slot_pages[i] is not None:
                 if self.module_list[self._module_type[i]] != type(self.slot_pages[i].patch):
+                    print(self.slot_pages[i].patch)
+                    print(self.module_list)
                     self._module_type[i] = self.module_list.index(
                         type(self.slot_pages[i].patch)
                     )
@@ -550,7 +553,7 @@ class SavePage(LonerPage):
     def draw_saveslot(self, ctx, slot, geometry):
         pass
 
-    def load_files(self, app):
+    def load_slot_content(self, app):
         pass
 
     def lr_press_event(self, app, lr):
@@ -569,7 +572,7 @@ class SavePage(LonerPage):
         self._slot_notes = [None] * self.num_slots
         self._save_timer = 0
         self._load_timer = 0
-        self._load_files_request = True
+        self._load_slot_content_request = True
 
     def slotpath(self, num=None):
         if num is None:
@@ -582,7 +585,7 @@ class SavePage(LonerPage):
                 self._save_timer += delta_ms
                 if self._save_timer >= self.hold_time and not self._load_timer:
                     self.save(app)
-                    self._load_files_request = True
+                    self._load_slot_content_request = True
         else:
             self._save_timer = 0
 
@@ -601,11 +604,12 @@ class SavePage(LonerPage):
             ):
                 self.delete(app)
                 self._load_timer = 33333
-                self._load_files_request = True
+                self._load_slot_content_request = True
 
-        if self._load_files_request:
-            self.load_files(app)
-            self._load_files_request = False
+        if self._load_slot_content_request:
+            self.load_slot_content(app)
+            self.full_redraw = True
+            self._load_slot_content_request = False
 
     def draw(self, ctx, app):
         if self.full_redraw:

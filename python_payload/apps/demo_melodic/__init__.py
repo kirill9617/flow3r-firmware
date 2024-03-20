@@ -10,7 +10,8 @@ from .ui.pages.scale_page import *
 from .ui.pages.synth import ToggleParameter, Modulator
 from .audio.synth import *
 from .helpers import *
-from .audio import oscs, fx
+from .audio import AudioModuleCollection
+from .colors import colorthemes
 
 
 class MelodicApp(Application):
@@ -319,38 +320,6 @@ class MelodicApp(Application):
         ctx.arc(0, 0, 25, 0, math.tau, 1).stroke()
         ctx.restore()
 
-    """
-    def _build_osc(self, osc_target, slot):
-        if self.blm is None:
-            return
-        if slot > len(self.osc_pages):
-            return
-
-        if osc_target is None:
-            if self.osc_pages[slot] is not None:
-                self.osc_pages[slot].delete()
-            self.osc_pages[slot] = None
-            self.mixer_page.params[slot].name = "/"
-        else:
-            if self.osc_pages[slot] is None:
-                pass
-            elif isinstance(self.osc_pages[slot], osc_target):
-                return
-            else:
-                self.osc_pages[slot].delete()
-            osc = self.blm.new(osc_target)
-            osc.signals.pitch = self.synth.signals.osc_pitch[slot]
-            osc.signals.output = self.synth.signals.osc_input[slot]
-            self.mixer_page.params[slot * 3].display_name = osc.name
-            page = osc.make_page()
-            page.finalize(self.blm, self.modulators)
-            self.osc_pages[slot] = page
-
-        pages = [self.osc_selector_page] + [self.mixer_page] + [self.env_page]
-        pages += [page for page in self.osc_pages if page is not None]
-        self.oscs_page.children = pages
-    """
-
     def _build_synth(self):
         if self.blm is not None:
             return
@@ -400,8 +369,13 @@ class MelodicApp(Application):
         self.notes_page = SubMenuPage("notes")
         self.sound_page = SubMenuPage("sounds")
         self.config_page = SubMenuPage("config")
-        self.oscs_page = AudioModulePageGroup("oscs", self, OscSelectPage, oscs.osc_list)
-        self.fx_page = AudioModulePageGroup("fx", self, FxSelectPage, fx.fx_list)
+        self._abs_path_ = "/flash/sys/apps/demo_melodic"
+        
+        oscs = AudioModuleCollection("oscs", self._abs_path_)
+        self.oscs_page = AudioModulePageGroup("oscs", self, OscSelectPage, oscs)
+        fx = AudioModuleCollection("fx", self._abs_path_)
+        self.fx_page = AudioModulePageGroup("fx", self, FxSelectPage, fx)
+
         self.dyna_page = PageGroup("dyna")
         self.mods_page = PageGroup("mods")
         self.play_page = PlayingPage()
@@ -455,8 +429,6 @@ class MelodicApp(Application):
         super().on_enter(vm)
         self.enter_done = False
         self.pages = []
-        oscs.update_oscs("/flash/sys/apps/demo_melodic")
-        fx.update_fx("/flash/sys/apps/demo_melodic")
         self._build_synth()
         
         #self.load_sound_settings("autosave.json")
@@ -587,18 +559,9 @@ class MelodicApp(Application):
 
     def get_sound_settings(self):
         return self.sound_page.get_settings()
-        sound_settings = {}
-        for page in self.synth_pages + [self.mixer_page]:
-            sound_settings[page.name] = page.get_settings()
-        osc_settings = []
-        for page in self.osc_pages:
-            if page is not None:
-                settings = {}
-                settings["params"] = page.get_settings()
-                settings["type"] = page.patch.name
-                osc_settings += [settings]
-        sound_settings["oscs"] = osc_settings
-        return sound_settings
+
+    def set_sound_settings(self, settings):
+        self.sound_page.set_settings(settings)
 
     def get_notes_settings(self):
         notes_settings = {
@@ -608,26 +571,6 @@ class MelodicApp(Application):
         }
         return notes_settings
 
-    def set_sound_settings(self, settings):
-        self.oscs_page.set_settings(settings)
-        return
-        for page in self.synth_pages + [self.mixer_page]:
-            if page.name in settings.keys():
-                page.set_settings(settings[page.name])
-            else:
-                print(f"no setting found for {page.name}")
-
-        if "oscs" in settings.keys():
-            for x, osc in enumerate(settings["oscs"]):
-                name = osc["type"]
-                osc_type = oscs.get_osc_by_name(name)
-                if osc_type is not None:
-                    self._build_osc(osc_type, x)
-                    self.osc_pages[x].set_settings(osc["params"])
-                else:
-                    print(f"couldn't find osc type {name}")
-        else:
-            print("no setting found for oscs")
 
     def set_notes_settings(self, settings):
         self.base_scale = settings["base scale"]

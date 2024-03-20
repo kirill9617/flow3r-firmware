@@ -5,11 +5,12 @@ class SoundSavePage(SavePage):
     def draw_saveslot(self, ctx, slot, geometry):
         xsize, ysize, center, yoffset = geometry
         names = self._slot_content[slot]
-        if not names:
-            names = ["???"]
-        names = names[:1] + ["x"] + names[1:]
-        ctx.save()
         ctx.font_size = 16
+        if not names:
+            ctx.font_size = 14
+            names = ["(nothing)"]
+        names = names[:3]
+        ctx.save()
         for i, name in enumerate(names):
             ctx.move_to(center, yoffset + ysize / 4 + 14 * i - 15)
             ctx.text(name)
@@ -27,7 +28,7 @@ class SoundSavePage(SavePage):
         app.delete_sound_settings(self.slotpath())
         print("sound deleted at " + self.slotpath())
 
-    def load_files(self, app):
+    def load_slot_content(self, app):
         for i in range(self.num_slots):
             settings = app.load_sound_settings_file(self.slotpath(i))
             if settings is None:
@@ -40,7 +41,6 @@ class SoundSavePage(SavePage):
                             if x in settings[y].keys():
                                 names += [settings[y][x]["type"]]
                 self._slot_content[i] = names
-        self.full_redraw = True
 
 
 class OscSelectPage(AudioModuleSelectPage):
@@ -77,6 +77,8 @@ class FxSelectPage(AudioModuleSelectPage):
             return
         if slot > len(self.slot_pages):
             return
+        if type(module_target) == str:
+            module_target = self.collection.get_module_by_name(module_target)
 
         if module_target is None:
             if self.slot_pages[slot] is not None:
