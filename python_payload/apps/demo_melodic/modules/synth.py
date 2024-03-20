@@ -1,6 +1,6 @@
 import bl00mbox
 import math
-from ..ui.pages.synth import *
+from ..pages import *
 
 
 class rand_lfo(bl00mbox.Patch):

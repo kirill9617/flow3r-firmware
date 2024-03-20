@@ -4,13 +4,9 @@ import bl00mbox
 import leds
 import math, os, json, errno
 
-from .ui import colorthemes
-from .ui.pages.osc_page import *
-from .ui.pages.scale_page import *
-from .ui.pages.synth import ToggleParameter, Modulator
-from .audio.synth import *
+from .pages import * 
+from .modules.synth import *
 from .helpers import *
-from .audio import AudioModuleCollection
 from .colors import colorthemes
 
 
@@ -638,7 +634,7 @@ class MelodicApp(Application):
         settings = self.get_notes_settings()
         old_settings = self.load_notes_settings_file(filename)
         if old_settings is not None:
-            if dicts_match_resursive(old_settings, settings):
+            if dicts_match_recursive(old_settings, settings):
                 return
         path = self.savefile_dir + "/notes"
         try:

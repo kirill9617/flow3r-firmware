@@ -1,6 +1,6 @@
 import bl00mbox
 import math
-from ui.pages.synth import *
+from pages import *
 
 class dly(bl00mbox.Patch):
     name = "dly"
