@@ -26,7 +26,7 @@ class sines_osc(bl00mbox.Patch):
         self.signals.output = self.plugins.mixer.signals.output
 
     def make_page(self):
-        page = ParameterPage(self.name, self)
+        page = ModulePage(self.name, self)
         names = ["root", "oct", "fifth", "third"]
         for x in range(4):
             param = Parameter(

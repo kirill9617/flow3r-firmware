@@ -4,7 +4,7 @@ import bl00mbox
 import leds
 import math, os, json, errno
 
-from .pages import * 
+from .pages import *
 from .modules.synth import *
 from .helpers import *
 from .colors import colorthemes
@@ -92,7 +92,7 @@ class MelodicApp(Application):
             self.scale[(self.mid_point_petal + j) % 10] = tone
 
     def draw(self, ctx):
-        if not self.enter_done:
+        if not self.enter_done or self.blm is None:
             self.fg_page.full_redraw = True
             return
         for mod in self.modulators:
@@ -104,18 +104,22 @@ class MelodicApp(Application):
         ctx.font = "Arimo Bold"
         ctx.text_align = ctx.CENTER
         ctx.font_size = 22
-        ctx.rgb(*self.cols.fg)
-        ctx.arc(0, -180, 95, 0, math.tau, 1).fill()
+        ctx.rgb(*self.cols.alt)
+        ctx.line_width = 2
+        ctx.arc(0, -180, 95, 0, math.tau, 1).stroke()
         ctx.move_to(0, -97)
-        ctx.rgb(*self.cols.bg)
+        ctx.rgb(*self.cols.fg)
         ctx.text(name)
         ctx.restore()
 
     def draw_modulator_indicator(self, ctx, text=None, arrow=False, col=None, sub=0):
         ctx.save()
         ctx.font = "Arimo Bold"
-        ctx.rgb(*self.cols.fg)
+        ctx.line_width = 2
+        ctx.rgb(*self.cols.bg)
         ctx.arc(0, 150, 100, 0, math.tau, 1).fill()
+        ctx.rgb(*self.cols.alt)
+        ctx.arc(0, 150, 100, 0, math.tau, 1).stroke()
         rad = 50
         pos = 83
         lr_arrows = False
@@ -132,13 +136,13 @@ class MelodicApp(Application):
             if sub:
                 ctx.rgb(*self.cols.hi)
             else:
-                ctx.rgb(*self.cols.fg)
+                ctx.rgb(*self.cols.bg)
         else:
             ctx.rgb(*col)
         if sub:
             rad = 40 + self.modulators[sub - 1].output * 10
         ctx.arc(0, 150, rad, 0, math.tau, 1).fill()
-        ctx.rgb(*self.cols.bg)
+        ctx.rgb(*self.cols.fg)
         ctx.text_align = ctx.CENTER
         ctx.font_size = 19
         if arrow:
@@ -316,9 +320,15 @@ class MelodicApp(Application):
         ctx.arc(0, 0, 25, 0, math.tau, 1).stroke()
         ctx.restore()
 
-    def _build_synth(self):
+    def destroy_synth(self):
         if self.blm is not None:
-            return
+            self.blm.volume = 0
+            self.blm.clear()
+            self.blm.free = True
+            self.blm = None
+
+    def build_synth(self):
+        self.destroy_synth
 
         self.blm = bl00mbox.Channel("mono synth")
         self.blm.volume = 13000
@@ -366,10 +376,12 @@ class MelodicApp(Application):
         self.sound_page = SubMenuPage("sounds")
         self.config_page = SubMenuPage("config")
         self._abs_path_ = "/flash/sys/apps/demo_melodic"
-        
-        oscs = AudioModuleCollection("oscs", self._abs_path_)
+
+        oscs = AudioModuleCollection(
+            "oscs", self._abs_path_, defaults=["acid", "dream"]
+        )
         self.oscs_page = AudioModulePageGroup("oscs", self, OscSelectPage, oscs)
-        fx = AudioModuleCollection("fx", self._abs_path_)
+        fx = AudioModuleCollection("fx", self._abs_path_, defaults=["fltr", None])
         self.fx_page = AudioModulePageGroup("fx", self, FxSelectPage, fx)
 
         self.dyna_page = PageGroup("dyna")
@@ -400,10 +412,9 @@ class MelodicApp(Application):
         ]
 
         self.play_page.children = [self.notes_page, self.sound_page]
-        if self.fg_page is None:
-            self._fg_page = self.play_page
+        self._fg_page = self.play_page
 
-    def update_leds(self, init=False):
+    def update_leds(self, full_redraw=False):
         norm = self.env_value / 2 + 0.5
         env = [x * norm for x in self.cols.alt]
         norm = self.lfo_value / 2 + 0.5
@@ -413,7 +424,7 @@ class MelodicApp(Application):
                 leds.set_rgb((i + k) % 40, *lfo)
             for k in [-2]:
                 leds.set_rgb((i + k) % 40, *env)
-        if init:
+        if full_redraw:
             for i in range(0, 40, 8):
                 for k in [3, -3, 4]:
                     leds.set_rgb((i + k) % 40, *self.cols.fg)
@@ -424,19 +435,12 @@ class MelodicApp(Application):
     def on_enter(self, vm):
         super().on_enter(vm)
         self.enter_done = False
-        self.pages = []
-        self._build_synth()
-        
-        #self.load_sound_settings("autosave.json")
-        #self.load_notes_settings("autosave.json")
-        """
-        if self.osc_pages[0] is None:
-            self._build_osc(oscs.get_osc_by_name("acid"), 0)
-        if self.osc_pages[1] is None:
-            self._build_osc(oscs.get_osc_by_name("dream"), 1)
-        """
-        self.fg_page.full_redraw = True
-        self.update_leds(init=True)
+        self.build_synth()
+
+        # self.load_sound_settings("autosave.json")
+        # self.load_notes_settings("autosave.json")
+
+        self.update_leds(full_redraw=True)
         self.make_scale()
 
     def on_enter_done(self):
@@ -445,12 +449,7 @@ class MelodicApp(Application):
     def on_exit(self):
         self.save_sound_settings("autosave.json")
         self.save_notes_settings("autosave.json")
-        if self.blm is not None:
-            self.blm.volume = 0
-            self.blm.clear()
-            self.blm.free = True
-        self.pages = []
-        self.blm = None
+        self.destroy_synth()
 
     def shift_playing_field_by_num_petals(self, num):
         num_positive = True
@@ -567,7 +566,6 @@ class MelodicApp(Application):
         }
         return notes_settings
 
-
     def set_notes_settings(self, settings):
         self.base_scale = settings["base scale"]
         self.mid_point = settings["mid point"]
@@ -592,7 +590,6 @@ class MelodicApp(Application):
 
     def save_sound_settings(self, filename):
         settings = self.get_sound_settings()
-        print(settings)
         old_settings = self.load_sound_settings_file(filename)
         if old_settings is not None:
             if dicts_match_recursive(old_settings, settings):

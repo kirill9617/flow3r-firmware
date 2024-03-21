@@ -52,7 +52,7 @@ class dream_osc(bl00mbox.Patch):
         self.signals.output = self.plugins.out_mixer.signals.output
 
     def make_page(self):
-        page = ParameterPage(self.name, self)
+        page = ModulePage(self.name, self)
         param = Parameter(
             self.plugins.mixers[0].signals.input_gain[0],
             "shine",

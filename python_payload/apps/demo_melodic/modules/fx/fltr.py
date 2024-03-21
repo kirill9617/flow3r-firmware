@@ -2,8 +2,10 @@ import bl00mbox
 import math
 from pages import *
 
+
 class fltr(bl00mbox.Patch):
     name = "fltr"
+
     def __init__(self, chan):
         super().__init__(chan)
         self.plugins.filter = self._channel.new(bl00mbox.plugins.filter)
@@ -27,7 +29,7 @@ class fltr(bl00mbox.Patch):
         return ["lp", "lp+bp", "bp", "bp+hp", "hp"][int(val)]
 
     def make_page(self):
-        page = ParameterPage("fltr")
+        page = ModulePage("fltr", self)
         param = Parameter(
             self.plugins.filter.signals.cutoff,
             "cutoff",
@@ -54,4 +56,3 @@ class fltr(bl00mbox.Patch):
         param.modulated = True
         page.params += [param]
         return page
-

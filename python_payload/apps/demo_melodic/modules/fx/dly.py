@@ -2,8 +2,10 @@ import bl00mbox
 import math
 from pages import *
 
+
 class dly(bl00mbox.Patch):
     name = "dly"
+
     def __init__(self, chan):
         super().__init__(chan)
         self.plugins.delay = self._channel.new(bl00mbox.plugins.delay_static, 1000)
@@ -11,7 +13,7 @@ class dly(bl00mbox.Patch):
         self.signals.output = self.plugins.delay.signals.output
 
     def make_page(self):
-        page = ParameterPage("dly")
+        page = ModulePage("dly", self)
         param = Parameter(
             self.plugins.delay.signals.time,
             "time",
@@ -28,7 +30,7 @@ class dly(bl00mbox.Patch):
         )
         param.modulated = True
         page.params += [param]
-        param = Parameter(self.plugins.delay.signals.level, "wet", 0.5, [0,32767])
+        param = Parameter(self.plugins.delay.signals.level, "wet", 0.5, [0, 32767])
         param.modulated = True
         page.params += [param]
         param = Parameter(self.plugins.delay.signals.dry_vol, "dry", 1, [0, 32767])

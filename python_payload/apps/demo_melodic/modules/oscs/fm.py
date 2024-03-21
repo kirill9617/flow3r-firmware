@@ -2,6 +2,7 @@ import bl00mbox
 import math
 from pages import *
 
+
 class fm_osc(bl00mbox.Patch):
     name = "fm"
 
@@ -46,7 +47,7 @@ class fm_osc(bl00mbox.Patch):
         return "x" + str(round(2 ** (signal.tone / 12)))
 
     def make_page(self):
-        page = ParameterPage(self.name, self)
+        page = ModulePage(self.name, self)
         dparams = []
         sparams = []
         for i in range(2):

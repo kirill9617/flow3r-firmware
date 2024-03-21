@@ -3,6 +3,7 @@ import bl00mbox
 import os
 import sys
 
+
 class Page:
     def __init__(self, name):
         # TODO: clean up this mess
@@ -184,8 +185,8 @@ class PlayingPage(Page):
         ctx.line_width = 8
         ctx.move_to(0, 0)
         ctx.line_to(120, 0).stroke()
-        ctx.rgb(*app.cols.hi)
-        ctx.line_width = 1
+        ctx.rgb(*app.cols.alt)
+        ctx.line_width = 2
         ctx.move_to(3, 0)
         ctx.line_to(120, 0).stroke()
 
@@ -247,6 +248,7 @@ class AudioModulePageGroup(PageGroup):
         self._selectpage = selectpage(name, app, collection)
         self._app = app
         self._update_children()
+        self._selectpage._update_parent()
 
     def get_settings(self):
         settings = {}
@@ -254,7 +256,7 @@ class AudioModulePageGroup(PageGroup):
             s = child.get_settings()
             if s:
                 settings[child.name] = s
-        for slot, slotlabel in [[0,"slot A"], [1, "slot B"]]:
+        for slot, slotlabel in enumerate(["slot A", "slot B"]):
             if self._slotpages[slot] is not None:
                 s = {}
                 s["type"] = self._slotpages[slot].name
@@ -266,14 +268,13 @@ class AudioModulePageGroup(PageGroup):
         for child in self.fixedpages:
             if child.name in settings.keys():
                 child.set_settings(settings[child.name])
-        for slot, slotlabel in [[0,"slot A"], [1, "slot B"]]:
-            sp = self._selectpage
+        for slot, slotlabel in enumerate(["slot A", "slot B"]):
+            module_name = None
+            params = None
             if slotlabel in settings.keys():
-                module_type = self._slotpages[slot].name
-                params = self._slotpages[slot].get_settings()
-                sp.swap_module(self._app, self.get_module_by_name(module_type), slot)
-            else:
-                sp.swap_module(self._app, None, slot)
+                module_name = settings[slotlabel]["type"]
+                params = settings[slotlabel]["params"]
+            self._selectpage.swap_module(module_name, slot, settings=params)
 
     def get_module_by_name(self, name):
         return None
@@ -316,14 +317,43 @@ class AudioModuleSelectPage(Page):
         collection.update()
         self.collection = collection
         self.module_list = collection.module_list
-        self._module_type = [len(self.module_list)] * 2
+        self._module_index = [len(self.module_list)] * 2
         self.slot_pages = [None, None]
         self._app = app
+        for i in range(2):
+            if collection.defaults[i] is not None:
+                self.swap_module(collection.defaults[i], i)
 
     def _update_parent(self):
-        self.parent.slotpages = self.slot_pages
+        if self.parent is not None:
+            self.parent.slotpages = self.slot_pages
 
-    def swap_module(self, app, module, slot):
+    def swap_module(self, module_target, slot, settings=None):
+        if self._app.blm is None or slot > len(self.slot_pages):
+            return
+        if type(module_target) == str:
+            module_t = self.collection.get_module_by_name(module_target)
+            if module_t is None:
+                print(f"module {module_target} not found")
+            module_target = module_t
+
+        def module_target_in_slot(s, t):
+            if t is None:
+                return s is None
+            return isinstance(s, t)
+
+        if not module_target_in_slot(self.slot_pages[slot], module_target):
+            if self.slot_pages[slot] is not None:
+                self.slot_pages[slot].delete()
+                self.slot_pages[slot] = None
+            self._insert_module(module_target, slot)
+            self._update_parent()
+            self._update_module_index()
+
+        if settings is not None and self.slot_pages[slot] is not None:
+            self.slot_pages[slot].set_settings(settings)
+
+    def _insert_module(self, module_target, slot):
         pass
 
     def draw(self, ctx, app):
@@ -341,7 +371,7 @@ class AudioModuleSelectPage(Page):
             ctx.rotate(rot)
             ctx.translate(-x, -y)
             for i in range(3):
-                j = (self._module_type[k] + i - 1) % (len(self.module_list) + 1)
+                j = (self._module_index[k] + i - 1) % (len(self.module_list) + 1)
                 rot = (1 - k * 2) * (1 - i) * math.tau / 60
                 x = (k * 2 - 1) * 67
                 y = i * 40 - 52
@@ -388,29 +418,30 @@ class AudioModuleSelectPage(Page):
             ctx.rel_line_to(-4, -6)
             ctx.stroke()
 
-    def _update_module_type(self):
-        for i in range(2):
-            if self.slot_pages[i] is not None:
-                if self.module_list[self._module_type[i]] != type(self.slot_pages[i].patch):
-                    print(self.slot_pages[i].patch)
-                    print(self.module_list)
-                    self._module_type[i] = self.module_list.index(
-                        type(self.slot_pages[i].patch)
-                    )
+    def _update_module_index(self):
+        for slot in range(2):
+            if self.slot_pages[slot] is not None:
+                module_t = type(self.slot_pages[slot].patch)
+                if self._module_index[slot] < len(self.module_list):
+                    if self.module_list[self._module_index[slot]] == module_t:
+                        continue
+                try:
+                    self._module_index[slot] = self.module_list.index(module_t)
+                except ValueError:
+                    print("unknown module. weird. ah well.")
+                    self.swap_module(None, slot)
             else:
-                self._module_type[i] = len(self.module_list)
+                self._module_index[slot] = len(self.module_list)
 
     def think(self, ins, delta_ms, app):
         for slot, petal, plusminus in [[0, 7, 1], [0, 9, -1], [1, 3, 1], [1, 1, -1]]:
             if app.input.captouch.petals[petal].whole.pressed:
-                self._module_type[slot] += plusminus
-                self._module_type[slot] %= len(self.module_list) + 1
-                if self._module_type[slot] == len(self.module_list):
-                    self.swap_module(app, None, slot)
+                self._module_index[slot] += plusminus
+                self._module_index[slot] %= len(self.module_list) + 1
+                if self._module_index[slot] < len(self.module_list):
+                    self.swap_module(self.module_list[self._module_index[slot]], slot)
                 else:
-                    self.swap_module(app, self.module_list[self._module_type[slot]], slot)
-                self._update_parent()
-                self._update_module_type()
+                    self.swap_module(None, slot)
 
 
 class SubMenuPage(Page):
@@ -530,7 +561,7 @@ class SubMenuPage(Page):
         ctx.rectangle(-120, -120, 240, 240).fill()
         app.draw_title(ctx, self.name)
         if self.savepage is not None:
-            app.draw_modulator_indicator(ctx, "save/load", col=app.cols.fg, arrow=True)
+            app.draw_modulator_indicator(ctx, "save/load", arrow=True)
         ctx.save()
         ctx.font = "Arimo Bold"
         for x, page in enumerate(self.menupages):
@@ -750,6 +781,7 @@ class SavePage(LonerPage):
 
             self.full_redraw = False
 
+
 class SoundSavePage(SavePage):
     def draw_saveslot(self, ctx, slot, geometry):
         xsize, ysize, center, yoffset = geometry
@@ -793,71 +825,47 @@ class SoundSavePage(SavePage):
 
 
 class OscSelectPage(AudioModuleSelectPage):
-    def swap_module(self, app, module_target, slot):
-        if app.blm is None:
-            return
-        if slot > len(self.slot_pages):
-            return
-
-        if module_target is None:
-            if self.slot_pages[slot] is not None:
-                self.slot_pages[slot].delete()
-                self.slot_pages[slot] = None
-        else:
-            if isinstance(self.slot_pages[slot], module_target):
-                return 
-            if self.slot_pages[slot] is not None:
-                self.slot_pages[slot].delete()
-            module = app.blm.new(module_target)
-            module.signals.pitch = app.synth.signals.osc_pitch[slot]
-            module.signals.output = app.synth.signals.osc_input[slot]
+    def _insert_module(self, module_target, slot):
+        if module_target is not None:
+            module = self._app.blm.new(module_target)
+            module.signals.pitch = self._app.synth.signals.osc_pitch[slot]
+            module.signals.output = self._app.synth.signals.osc_input[slot]
             page = module.make_page()
-            page.finalize(app.blm, app.modulators)
+            page.finalize(self._app.blm, self._app.modulators)
             self.slot_pages[slot] = page
 
         if self.slot_pages[slot] is not None:
-            app.mixer_page.params[slot * 3].display_name = self.slot_pages[slot].name
+            self._app.mixer_page.params[slot * 3].display_name = self.slot_pages[
+                slot
+            ].name
         else:
-            app.mixer_page.params[slot * 3].display_name = "(none)"
+            self._app.mixer_page.params[slot * 3].display_name = "(none)"
+
 
 class FxSelectPage(AudioModuleSelectPage):
-    def swap_module(self, app, module_target, slot):
-        if app.blm is None:
-            return
-        if slot > len(self.slot_pages):
-            return
-        if type(module_target) == str:
-            module_target = self.collection.get_module_by_name(module_target)
-
-        if module_target is None:
-            if self.slot_pages[slot] is not None:
-                self.slot_pages[slot].delete()
-                self.slot_pages[slot] = None
-        else:
-            if isinstance(self.slot_pages[slot], module_target):
-                return 
-            if self.slot_pages[slot] is not None:
-                self.slot_pages[slot].delete()
-            module = app.blm.new(module_target)
-            module.signals.pitch = app.synth.signals.fx_send
-            module.signals.output = app.synth.signals.fx_return
+    def _insert_module(self, module_target, slot):
+        if module_target is not None:
+            module = self._app.blm.new(module_target)
+            module.signals.pitch = self._app.synth.signals.fx_send
+            module.signals.output = self._app.synth.signals.fx_return
             page = module.make_page()
-            page.finalize(app.blm, app.modulators)
-            page.patch = module
+            page.finalize(self._app.blm, self._app.modulators)
             self.slot_pages[slot] = page
-        # serial connection only for now
+
         if self.slot_pages[0] is not None and self.slot_pages[1] is not None:
-            app.synth.signals.fx_send = self.slot_pages[0].patch.signals.input
-            self.slot_pages[0].patch.signals.output = self.slot_pages[1].patch.signals.input
-            app.synth.signals.fx_return = self.slot_pages[1].patch.signals.output
+            self._app.synth.signals.fx_send = self.slot_pages[0].patch.signals.input
+            self.slot_pages[0].patch.signals.output = self.slot_pages[
+                1
+            ].patch.signals.input
+            self._app.synth.signals.fx_return = self.slot_pages[1].patch.signals.output
         elif self.slot_pages[0] is not None:
-            app.synth.signals.fx_send = self.slot_pages[0].patch.signals.input
-            app.synth.signals.fx_return = self.slot_pages[0].patch.signals.output
+            self._app.synth.signals.fx_send = self.slot_pages[0].patch.signals.input
+            self._app.synth.signals.fx_return = self.slot_pages[0].patch.signals.output
         elif self.slot_pages[1] is not None:
-            app.synth.signals.fx_send = self.slot_pages[1].patch.signals.input
-            app.synth.signals.fx_return = self.slot_pages[1].patch.signals.output
+            self._app.synth.signals.fx_send = self.slot_pages[1].patch.signals.input
+            self._app.synth.signals.fx_return = self.slot_pages[1].patch.signals.output
         else:
-            app.synth.signals.fx_send = app.synth.signals.fx_return
+            self._app.synth.signals.fx_send = self._app.synth.signals.fx_return
 
 
 class NotesSavePage(SavePage):
@@ -1023,6 +1031,7 @@ class ScaleSetupPage(Page):
             ctx.rotate(step)
             if size > 1:
                 ctx.rotate((oversize - 1) * step)
+
 
 class Modulator:
     def __init__(self, name, patch, signal_range=[-2048, 2048], feed_hook=None):
@@ -1192,6 +1201,11 @@ class ParameterPage(Page):
                     )
             self.toggle.full_redraw = False
         self.full_redraw = False
+
+
+class ModulePage(ParameterPage):
+    def __init__(self, name, patch):
+        super().__init__(name, patch)
 
 
 class ToggleParameter:
@@ -1398,14 +1412,16 @@ class Parameter:
         elif type(settings) == int or type(settings) == float:
             self.norm = settings / 1000
 
+
 class AudioModuleCollection:
-    def __init__(self, name, app_path, sub_paths = None):
+    def __init__(self, name, app_path, sub_paths=None, defaults=[None, None]):
         self.module_list = []
         if sub_paths is None:
             sub_paths = f"/modules/{name}/"
         if type(sub_paths) == str:
             sub_paths = [sub_paths]
         self.name = name
+        self.defaults = defaults
         self.sub_paths = sub_paths
         self.app_path = app_path
 
@@ -1420,7 +1436,9 @@ class AudioModuleCollection:
             sys.path.append(module_path)
             module_files = os.listdir(module_path)
             module_files = [
-                x[:-3] for x in module_files if x.endswith(".py") and not x.startswith("_")
+                x[:-3]
+                for x in module_files
+                if x.endswith(".py") and not x.startswith("_")
             ]
             for module_file in module_files:
                 try:
@@ -1432,8 +1450,14 @@ class AudioModuleCollection:
                         ]:
                             continue
                         attr = getattr(mod, attrname, None)
-                        if isinstance(attr, type) and issubclass(attr, bl00mbox.Patch) and attr not in modules:
-                            print(f"module collection {self.name}: discovered {attrname} in {module_file}.py")
+                        if (
+                            isinstance(attr, type)
+                            and issubclass(attr, bl00mbox.Patch)
+                            and attr not in modules
+                        ):
+                            print(
+                                f"module collection {self.name}: discovered {attrname} in {module_file}.py"
+                            )
                             modules += [attr]
                 except:
                     print("failed to import " + module_file + ".py")
