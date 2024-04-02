@@ -2,18 +2,17 @@
 #include "py/runtime.h"
 
 #include "flow3r_bsp_captouch.h"
-#include "st3m_captouch.h"
 
 #include <string.h>
 
 STATIC mp_obj_t mp_captouch_calibration_active(void) {
-    return mp_obj_new_int(st3m_captouch_calibrating());
+    return mp_obj_new_int(flow3r_bsp_captouch_calibrating());
 }
 STATIC MP_DEFINE_CONST_FUN_OBJ_0(mp_captouch_calibration_active_obj,
                                  mp_captouch_calibration_active);
 
 STATIC mp_obj_t mp_captouch_calibration_request(void) {
-    st3m_captouch_request_calibration();
+    flow3r_bsp_captouch_calibration_request();
     return mp_const_none;
 }
 STATIC MP_DEFINE_CONST_FUN_OBJ_0(mp_captouch_calibration_request_obj,
@@ -38,7 +37,7 @@ const mp_obj_type_t captouch_petal_state_type;
 typedef struct {
     mp_obj_base_t base;
     mp_obj_t petals;
-    st3m_captouch_state_t underlying;
+    flow3r_bsp_captouch_data_t underlying;
 } mp_captouch_state_t;
 
 const mp_obj_type_t captouch_state_type;
@@ -46,34 +45,35 @@ const mp_obj_type_t captouch_state_type;
 STATIC void mp_captouch_petal_pads_state_attr(mp_obj_t self_in, qstr attr,
                                               mp_obj_t *dest) {
     mp_captouch_petal_pads_state_t *self = MP_OBJ_TO_PTR(self_in);
+    mp_captouch_petal_state_t *petal = MP_OBJ_TO_PTR(self->petal);
     if (dest[0] != MP_OBJ_NULL) {
         return;
     }
 
-    mp_captouch_petal_state_t *petal = MP_OBJ_TO_PTR(self->petal);
-    mp_captouch_state_t *captouch = MP_OBJ_TO_PTR(petal->captouch);
-    st3m_petal_state_t *state = &captouch->underlying.petals[petal->ix];
+    // mp_captouch_state_t *captouch = MP_OBJ_TO_PTR(petal->captouch);
+    // flow3r_bsp_petal_data_t *state = &captouch->underlying.petals[petal->ix];
     bool top = (petal->ix % 2) == 0;
 
+    // deprecating these.
     if (top) {
         switch (attr) {
             case MP_QSTR_base:
-                dest[0] = mp_obj_new_bool(state->base.press_event);
+                dest[0] = mp_obj_new_bool(false);
                 break;
             case MP_QSTR_cw:
-                dest[0] = mp_obj_new_bool(state->cw.press_event);
+                dest[0] = mp_obj_new_bool(false);
                 break;
             case MP_QSTR_ccw:
-                dest[0] = mp_obj_new_bool(state->ccw.press_event);
+                dest[0] = mp_obj_new_bool(false);
                 break;
         }
     } else {
         switch (attr) {
             case MP_QSTR_tip:
-                dest[0] = mp_obj_new_bool(state->tip.press_event);
+                dest[0] = mp_obj_new_bool(false);
                 break;
             case MP_QSTR_base:
-                dest[0] = mp_obj_new_bool(state->base.press_event);
+                dest[0] = mp_obj_new_bool(false);
                 break;
         }
     }
@@ -87,7 +87,8 @@ STATIC void mp_captouch_petal_state_attr(mp_obj_t self_in, qstr attr,
     }
 
     mp_captouch_state_t *captouch = MP_OBJ_TO_PTR(self->captouch);
-    st3m_petal_state_t *state = &captouch->underlying.petals[self->ix];
+    flow3r_bsp_captouch_petal_data_t *state =
+        &captouch->underlying.petals[self->ix];
 
     bool top = (self->ix % 2) == 0;
 
@@ -102,7 +103,7 @@ STATIC void mp_captouch_petal_state_attr(mp_obj_t self_in, qstr attr,
             dest[0] = mp_obj_new_bool(state->press_event);
             break;
         case MP_QSTR_pressure:
-            dest[0] = mp_obj_new_int(state->pressure);
+            dest[0] = mp_obj_new_int(state->raw_coverage);
             break;
         case MP_QSTR_pads:
             dest[0] = self->pads;
@@ -142,10 +143,12 @@ MP_DEFINE_CONST_OBJ_TYPE(captouch_petal_state_type, MP_QSTR_CaptouchPetalState,
 MP_DEFINE_CONST_OBJ_TYPE(captouch_state_type, MP_QSTR_CaptouchState,
                          MP_TYPE_FLAG_NONE, attr, mp_captouch_state_attr);
 
-STATIC mp_obj_t mp_captouch_state_new(const st3m_captouch_state_t *underlying) {
+STATIC mp_obj_t
+mp_captouch_state_new(const flow3r_bsp_captouch_data_t *underlying) {
     mp_captouch_state_t *captouch = m_new_obj(mp_captouch_state_t);
     captouch->base.type = &captouch_state_type;
-    memcpy(&captouch->underlying, underlying, sizeof(st3m_captouch_state_t));
+    memcpy(&captouch->underlying, underlying,
+           sizeof(flow3r_bsp_captouch_data_t));
 
     captouch->petals = mp_obj_new_list(0, NULL);
     for (int i = 0; i < 10; i++) {
@@ -167,15 +170,15 @@ STATIC mp_obj_t mp_captouch_state_new(const st3m_captouch_state_t *underlying) {
 }
 
 STATIC mp_obj_t mp_captouch_read(void) {
-    st3m_captouch_state_t st;
-    st3m_captouch_get_all(&st);
-    return mp_captouch_state_new(&st);
+    flow3r_bsp_captouch_data_t dat;
+    flow3r_bsp_captouch_get(&dat);
+    return mp_captouch_state_new(&dat);
 }
 
 STATIC MP_DEFINE_CONST_FUN_OBJ_0(mp_captouch_read_obj, mp_captouch_read);
 
 STATIC mp_obj_t mp_captouch_refresh_events(void) {
-    st3m_captouch_refresh_all_events();
+    flow3r_bsp_captouch_refresh_events();
     return mp_const_none;
 }
 
@@ -183,20 +186,20 @@ STATIC MP_DEFINE_CONST_FUN_OBJ_0(mp_captouch_refresh_events_obj,
                                  mp_captouch_refresh_events);
 
 STATIC mp_obj_t mp_captouch_calibration_get_data(void) {
-    int32_t data[52];
+    int32_t data[50];
     flow3r_bsp_captouch_get_calibration_data(data);
-    mp_obj_t items[52];
-    for (uint8_t i = 0; i < 52; i++) {
+    mp_obj_t items[50];
+    for (uint8_t i = 0; i < 50; i++) {
         items[i] = mp_obj_new_int(data[i]);
     }
-    return mp_obj_new_tuple(52, items);
+    return mp_obj_new_tuple(50, items);
 }
 
 STATIC MP_DEFINE_CONST_FUN_OBJ_0(mp_captouch_calibration_get_data_obj,
                                  mp_captouch_calibration_get_data);
 
 STATIC mp_obj_t mp_captouch_calibration_set_data(mp_obj_t mp_data) {
-    int32_t data[52];
+    int32_t data[50];
     mp_obj_iter_buf_t iter_buf;
     mp_obj_t iterable = mp_getiter(mp_data, &iter_buf);
     mp_obj_t item;
@@ -204,9 +207,9 @@ STATIC mp_obj_t mp_captouch_calibration_set_data(mp_obj_t mp_data) {
     while ((item = mp_iternext(iterable)) != MP_OBJ_STOP_ITERATION) {
         data[i] = mp_obj_get_int(item);
         i++;
-        if (i == 52) break;
+        if (i == 50) break;
     }
-    // if(i != 52) TODO: Throw error? Maybe?
+    // if(i != 50) TODO: Throw error? Maybe?
     flow3r_bsp_captouch_set_calibration_data(data);
     return mp_const_none;
 }
