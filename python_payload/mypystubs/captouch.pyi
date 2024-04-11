@@ -1,49 +1,10 @@
 from typing import Protocol, List, Tuple
 
-class CaptouchPetalPadsState(Protocol):
-    """
-    Current state of pads on a captouch petal.
-
-    Not all petals have all pads. Top petals have a a base, cw and ccw pad.
-    Bottom petals have a base and tip pad.
-    """
-
-    @property
-    def tip(self) -> bool:
-        """
-        True if the petals's tip is currently touched.
-        """
-        ...
-    @property
-    def base(self) -> bool:
-        """
-        True if the petal's base is currently touched.
-        """
-        ...
-    @property
-    def cw(self) -> bool:
-        """
-        True if the petal's clockwise pad is currently touched.
-        """
-        ...
-    @property
-    def ccw(self) -> bool:
-        """
-        True if the petal's counter clockwise pad is currently touched.
-        """
-        ...
-
 class CaptouchPetalState(Protocol):
     @property
     def pressed(self) -> bool:
         """
-        True if any of the petal's pads is currently touched.
-        """
-        ...
-    @property
-    def pressure(self) -> int:
-        """
-        How strongly the petal is currently being touched, in arbitrary units.
+        True if the petal is being touched.
         """
         ...
     @property
@@ -56,12 +17,6 @@ class CaptouchPetalState(Protocol):
     def bottom(self) -> bool:
         """
         True if this is a bottom petal.
-        """
-        ...
-    @property
-    def pads(self) -> CaptouchPetalPadsState:
-        """
-        State of individual pads of the petal.
         """
         ...
     @property

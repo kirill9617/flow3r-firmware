@@ -20,15 +20,7 @@ STATIC MP_DEFINE_CONST_FUN_OBJ_0(mp_captouch_calibration_request_obj,
 
 typedef struct {
     mp_obj_base_t base;
-    mp_obj_t petal;
-} mp_captouch_petal_pads_state_t;
-
-const mp_obj_type_t captouch_petal_pads_state_type;
-
-typedef struct {
-    mp_obj_base_t base;
     mp_obj_t captouch;
-    mp_obj_t pads;
     size_t ix;
 } mp_captouch_petal_state_t;
 
@@ -41,43 +33,6 @@ typedef struct {
 } mp_captouch_state_t;
 
 const mp_obj_type_t captouch_state_type;
-
-STATIC void mp_captouch_petal_pads_state_attr(mp_obj_t self_in, qstr attr,
-                                              mp_obj_t *dest) {
-    mp_captouch_petal_pads_state_t *self = MP_OBJ_TO_PTR(self_in);
-    mp_captouch_petal_state_t *petal = MP_OBJ_TO_PTR(self->petal);
-    if (dest[0] != MP_OBJ_NULL) {
-        return;
-    }
-
-    // mp_captouch_state_t *captouch = MP_OBJ_TO_PTR(petal->captouch);
-    // flow3r_bsp_petal_data_t *state = &captouch->underlying.petals[petal->ix];
-    bool top = (petal->ix % 2) == 0;
-
-    // deprecating these.
-    if (top) {
-        switch (attr) {
-            case MP_QSTR_base:
-                dest[0] = mp_obj_new_bool(false);
-                break;
-            case MP_QSTR_cw:
-                dest[0] = mp_obj_new_bool(false);
-                break;
-            case MP_QSTR_ccw:
-                dest[0] = mp_obj_new_bool(false);
-                break;
-        }
-    } else {
-        switch (attr) {
-            case MP_QSTR_tip:
-                dest[0] = mp_obj_new_bool(false);
-                break;
-            case MP_QSTR_base:
-                dest[0] = mp_obj_new_bool(false);
-                break;
-        }
-    }
-}
 
 STATIC void mp_captouch_petal_state_attr(mp_obj_t self_in, qstr attr,
                                          mp_obj_t *dest) {
@@ -105,9 +60,6 @@ STATIC void mp_captouch_petal_state_attr(mp_obj_t self_in, qstr attr,
         case MP_QSTR_pressure:
             dest[0] = mp_obj_new_int(state->raw_coverage);
             break;
-        case MP_QSTR_pads:
-            dest[0] = self->pads;
-            break;
         case MP_QSTR_position: {
             mp_obj_t items[2] = {
                 mp_obj_new_int(state->pos_distance),
@@ -133,10 +85,6 @@ STATIC void mp_captouch_state_attr(mp_obj_t self_in, qstr attr,
     }
 }
 
-MP_DEFINE_CONST_OBJ_TYPE(captouch_petal_pads_state_type,
-                         MP_QSTR_CaptouchPetalPadsState, MP_TYPE_FLAG_NONE,
-                         attr, mp_captouch_petal_pads_state_attr);
-
 MP_DEFINE_CONST_OBJ_TYPE(captouch_petal_state_type, MP_QSTR_CaptouchPetalState,
                          MP_TYPE_FLAG_NONE, attr, mp_captouch_petal_state_attr);
 
@@ -156,12 +104,6 @@ mp_captouch_state_new(const flow3r_bsp_captouch_data_t *underlying) {
         petal->base.type = &captouch_petal_state_type;
         petal->captouch = MP_OBJ_FROM_PTR(captouch);
         petal->ix = i;
-
-        mp_captouch_petal_pads_state_t *pads =
-            m_new_obj(mp_captouch_petal_pads_state_t);
-        pads->base.type = &captouch_petal_pads_state_type;
-        pads->petal = MP_OBJ_FROM_PTR(petal);
-        petal->pads = MP_OBJ_FROM_PTR(pads);
 
         mp_obj_list_append(captouch->petals, MP_OBJ_FROM_PTR(petal));
     }

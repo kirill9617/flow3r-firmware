@@ -732,7 +732,12 @@ static inline void petal_process(uint8_t index) {
     if (top) distance = -distance;
 #endif
     petal->pressed = raw_sum > thres;
-    petal->raw_coverage = raw_sum / div;
+    if (petal->pressed) {  // backwards compat hack for the few ppl who use
+        petal->raw_coverage = raw_sum / div;  // it as a "pressed" proxy
+    } else {                                  // by comparing it to
+        petal->raw_coverage = 0;              // 0
+    }                                         // TODO: undo
+
     if ((!latch[index].press_event_new) || latch[index].fresh) {
         latch[index].press_event_new = petal->pressed;
         latch[index].fresh = false;
