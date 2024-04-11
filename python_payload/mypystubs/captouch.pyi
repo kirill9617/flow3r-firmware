@@ -22,15 +22,20 @@ class CaptouchPetalState(Protocol):
     @property
     def position(self) -> Tuple[int, int]:
         """
-        Polar coordinates of touch on petal in the form of a (distance, angle)
-        tuple.
+        Coordinates of touch on petal in the form of a (distance, angle)
+        tuple. The units are arbitrary, but centered around (0, 0).
 
-        The units are arbitrary, but centered around (0, 0).
+        These are approximately cartesian, but the axes are rotated to align
+        with the radial and angular components of the petal position relative
+        to the center of the badge, meaning:
 
         An increase in distance means the touch is further away from the centre
         of the badge.
 
         An increase in angle means the touch is more clockwise.
+
+        The hardware only provides angular positional data for the top petals,
+        the bottom petals always return an angle of 0.
         """
         ...
 
