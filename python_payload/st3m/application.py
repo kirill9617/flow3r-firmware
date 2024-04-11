@@ -11,8 +11,9 @@ from st3m.logging import Log
 from st3m.utils import is_simulator
 from st3m import settings
 from ctx import Context
-from st3m.ui import led_patterns
 import leds
+import time
+import json
 
 import toml
 import io
@@ -20,7 +21,6 @@ import os
 import os.path
 import stat
 import sys
-import sys_display
 import random
 import time
 from math import sin
@@ -124,47 +124,38 @@ class BundleMetadata:
     This data is used to discover bundles and load them as applications.
     """
 
-    __slots__ = ["path", "name", "menu", "_t", "version", "ctx"]
+    __slots__ = ["path", "name", "menu", "_metadata", "version", "ctx"]
 
-    def __init__(self, path: str) -> None:
+    def __init__(self, path: str, metadata: dict = None) -> None:
         self.path = path.rstrip("/")
-        try:
-            f = open(self.path + "/flow3r.toml")
-        except Exception:
-            raise BundleMetadataNotFound()
 
-        try:
-            t = toml.load(f)
-        except toml.TomlDecodeError as e:
-            f.close()
-            raise BundleMetadataCorrupt(str(e))
-        except Exception as e:
-            f.close()
-            raise BundleMetadataCorrupt(str(e))
-        f.close()
+        if not metadata:
+            self._metadata = load_toml(self.path + "/flow3r.toml")
+        else:
+            self._metadata = metadata
+        self.process_metadata()
 
-        if "app" not in t or type(t["app"]) != dict:
+    def process_metadata(self):
+        if not isinstance(self._metadata.get("app"), dict):
             raise BundleMetadataBroken("missing app section")
 
-        app = t["app"]
-        if "name" not in app or type(app["name"]) != str:
+        app = self._metadata["app"]
+        if not isinstance(app.get("name"), str):
             raise BundleMetadataBroken("missing app.name key")
         self.name = app["name"]
-        if "category" not in app or type(app["category"]) != str:
-            if "menu" not in app or type(app["menu"]) != str:
+        if not isinstance(app.get("category"), str):
+            if not isinstance(app.get("menu"), str):
                 raise BundleMetadataBroken("missing app.category key")
             self.menu = app["menu"]
         else:
             self.menu = app["category"]
 
         version = 0
-        if t.get("metadata") is not None:
-            version = t["metadata"].get("version", 0)
+        if not isinstance(self._metadata.get("metadata"), dict):
+            version = self._metadata["metadata"].get("version", 0)
         self.version = version
 
-        self._t = t
-
-        self.ctx = ApplicationContext(self.path, self._t)
+        self.ctx = ApplicationContext(self.path, self._metadata)
 
     @staticmethod
     def _sys_path_set(v: List[str]) -> None:
@@ -214,10 +205,10 @@ class BundleMetadata:
 
         Raises a BundleMetadataException if something goes wrong.
         """
-        entry = self._t.get("entry", None)
+        entry = self._metadata.get("entry", None)
         if entry is None:
             return self._load_class("App")
-        if "class" in entry and type(entry["class"]) == str:
+        if isinstance(entry.get("class"), str):
             class_entry = entry["class"]
             return self._load_class(class_entry)
 
@@ -423,48 +414,78 @@ class BundleManager:
     def _discover_at(self, path: str) -> None:
         path = path.rstrip("/")
         try:
-            l = os.listdir(path)
+            appdirs = os.listdir(path)
         except Exception as e:
             log.warning(f"Could not discover bundles in {path}: {e}")
-            l = []
+            return
 
-        for d in l:
-            dirpath = path + "/" + d
-            st = os.stat(dirpath)
-            if not stat.S_ISDIR(st[0]):
-                continue
+        cache_path = path + "/toml_cache.json"
 
-            tomlpath = dirpath + "/flow3r.toml"
+        if not os.path.exists(cache_path):
+            toml_cache = {}
+        else:
+            with open(cache_path) as f:
+                toml_cache = json.load(f)
+
+        toml_cache_modified = False
+
+        load_start = time.time_ns()
+        for dirname in appdirs:
+            dirpath = path + "/" + dirname
+            toml_path = dirpath + "/flow3r.toml"
             try:
-                st = os.stat(tomlpath)
-                if not stat.S_ISREG(st[0]):
+                toml_stat = os.stat(toml_path)
+                if not stat.S_ISREG(toml_stat[0]):
                     continue
             except Exception:
                 continue
 
+            if (
+                dirpath in toml_cache
+                and toml_cache[dirpath].get("_toml_size") == toml_stat[6]
+                and toml_cache[dirpath].get("_toml_change") == toml_stat[8]
+            ):
+                metadata = toml_cache[dirpath]
+            else:
+                try:
+                    metadata = load_toml(toml_path)
+                except BundleLoadException as e:
+                    log.error(f"Failed to bundle from {dirpath}: {e}")
+                    continue
+                toml_cache_modified = True
+                toml_cache[dirpath] = metadata
+                toml_cache[dirpath]["_toml_size"] = toml_stat[6]
+                toml_cache[dirpath]["_toml_change"] = toml_stat[8]
+                log.info(f"Adding {dirpath} to JSON cache.")
+
             try:
-                b = BundleMetadata(dirpath)
+                bundle = BundleMetadata(dirpath, metadata)
             except BundleLoadException as e:
-                log.error(f"Failed to bundle from {dirpath}: {e}")
+                log.error(f"Failed to load BundleMetadata: {e}")
                 continue
 
-            bundle_name = b.name
+            bundle_name = bundle.name
             if bundle_name not in self.bundles:
-                self.bundles[bundle_name] = b
+                self.bundles[bundle_name] = bundle
                 continue
             ex = self.bundles[bundle_name]
 
             # Do we have a newer version?
-            if b.version > ex.version:
-                self.bundles[bundle_name] = b
+            if bundle.version > ex.version:
+                self.bundles[bundle_name] = bundle
                 continue
             # Do we have a higher priority source?
-            if self._source_trumps(b.source, ex.source):
-                self.bundles[bundle_name] = b
+            if self._source_trumps(bundle.source, ex.source):
+                self.bundles[bundle_name] = bundle
                 continue
             log.warning(
-                f"Ignoring {bundle_name} at {b.source} as it already exists at {ex.source}"
+                f"Ignoring {bundle_name} at {bundle.source} as it already exists at {ex.source}"
             )
+
+        if toml_cache_modified:
+            with open(cache_path, "w") as f:
+                json.dump(toml_cache, f)
+        log.info(f"load time for {path}, {(time.time_ns() - load_start) / 1000000}ms")
 
     def update(self) -> None:
         self._discover_at("/flash/sys/apps")
@@ -472,42 +493,14 @@ class BundleManager:
         self._discover_at("/sd/apps")
 
 
-def discover_bundles(path: str) -> List[BundleMetadata]:
-    """
-    Discover valid bundles (directories containing flow3r.toml) inside a given
-    path.
+def load_toml(toml_path):
+    if not os.path.exists(toml_path):
+        raise BundleMetadataNotFound()
 
-    Only direct descendents will be checks - this function doesn't check
-    directories recursively.
-
-    Invalid bundles will be skipped and an error will be logged.
-    """
-    path = path.rstrip("/")
-    try:
-        l = os.listdir(path)
-    except Exception as e:
-        log.warning(f"Could not discover bundles in {path}: {e}")
-        l = []
-
-    bundles = []
-    for d in l:
-        dirpath = path + "/" + d
-        st = os.stat(dirpath)
-        if not stat.S_ISDIR(st[0]):
-            continue
-
-        tomlpath = dirpath + "/flow3r.toml"
+    with open(toml_path) as f:
         try:
-            st = os.stat(tomlpath)
-            if not stat.S_ISREG(st[0]):
-                continue
-        except Exception:
-            continue
-
-        try:
-            b = BundleMetadata(dirpath)
-        except BundleLoadException as e:
-            log.error(f"Failed to bundle from {dirpath}: {e}")
-            continue
-        bundles.append(b)
-    return bundles
+            return toml.load(f)
+        except toml.TomlDecodeError as e:
+            raise BundleMetadataCorrupt(str(e))
+        except Exception as e:
+            raise BundleMetadataCorrupt(str(e))
