@@ -163,9 +163,36 @@ void get_stage_hw_config(ad7147_chip_t *chip, ad7147_sequence_t *seq_out,
                          uint8_t i, uint8_t channel) {
     int8_t offset = chip->channels[channel].afe_offset;
     seq_out->stages[i].channel_mask = 1 << channel;
-    // seq_out->stages[i].idle_to_bias = !(chip->is_bot && (channel < 10)); //
-    // jumpy petal 2
-    seq_out->stages[i].idle_to_bias = !chip->is_bot;
+    /*
+       the datasheet recommends to connect captouch pads to the internal bias
+       while they are not being measured. here's why we're not doing that:
+
+       there was a strong cross talk issue on the bottom chip petals that
+       varied with grounding setup (e.g., plugging in a usb cable and putting
+       the other end in ur pocket changed behavior). we suspected that this
+       might be due to a capacitive interaction between device ground, chip bias
+       and chip shield driver. our wild theories were rewarded, and while
+       introducing a bit of noise (well within budget, mind you) this resolved
+       the issue.
+
+        a few months later, a rare edge case was brought to our attention: when
+        many channels on the top chip petals were saturated, similar cross talk
+        could be generated. we applied the fix to the top chip too, and sure
+        enough it resolved the issue. which makes sense except for fact that the
+        top chip petals don't couple to a shield driver.
+
+        we currently have no fully sensical mental model for why this works but
+        that's okay.
+    */
+    // datasheet recommendation-ish (13-seq has hardcoded bits that violate
+    // this, change manually!)
+    // seq_out->stages[i].idle_to_bias = true;
+    // experiment A: only top pads
+    // seq_out->stages[i].idle_to_bias = !(chip->is_bot && (channel < 10));
+    // experiment B: only top chip pads
+    // seq_out->stages[i].idle_to_bias = !chip->is_bot;
+    // experiment C: none (winner)
+    seq_out->stages[i].idle_to_bias = false;
     if (offset < 63) {
         seq_out->stages[i].neg_afe_offset = offset;
         seq_out->stages[i].pos_afe_offset = 0;
