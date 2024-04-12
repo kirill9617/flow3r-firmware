@@ -171,7 +171,7 @@ class NumberTunable(UnaryTunable):
     NumberTunable is a UnaryTunable that has a numeric value
     """
 
-    def __init__(self, name: str, key: str, default: Optional[int | float]) -> None:
+    def __init__(self, name: str, key: str, default: Optional[float]) -> None:
         super().__init__(name, key, default)
 
     def press(self, vm: Optional["ViewManager"]) -> None:

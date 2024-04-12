@@ -12,17 +12,25 @@ try:
 except ImportError:
     print("Info: No custom config.py found")
 
+SCREENSHOT = False
+SCREENSHOT_DELAY = 5
+FULL_SCREEN = os.environ.get("SIM_FULL_SCREEN", "0") == "1"
+
+
 pygame.init()
-screen_w = 814
-screen_h = 854
-screen = pygame.display.set_mode(size=(screen_w, screen_h))
+if FULL_SCREEN:
+    screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
+else:
+    screen = pygame.display.set_mode(size=(814, 854))
+screen_w = screen.get_width()
+screen_h = screen.get_height()
 simpath = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 bgpath = os.path.join(simpath, "background.png")
 background = pygame.image.load(bgpath)
 
-
-SCREENSHOT = False
-SCREENSHOT_DELAY = 5
+OLED_SIZE = int(os.environ["SIM_OLED_SIZE"])
+OLED_ASPECT = float(os.environ["SIM_OLED_ASPECT"])
+OLED_SCALE = float(os.environ["SIM_OLED_SCALE"])
 
 
 def path_replace(p):
@@ -395,7 +403,9 @@ class Simulation:
         )
         self._petal_surface_dirty = True
         self._full_surface = pygame.Surface((screen_w, screen_h), flags=pygame.SRCALPHA)
-        self._oled_surface = pygame.Surface((240, 240), flags=pygame.SRCALPHA)
+        self._oled_surface = pygame.Surface(
+            (OLED_SIZE, OLED_SIZE), flags=pygame.SRCALPHA
+        )
 
         # Calculate OLED per-row offset.
         #
@@ -411,8 +421,12 @@ class Simulation:
         # that is True if the pixel corresponding to this mask's bit is part of
         # the OLED disc, and false otherwise.
         mask = [
-            [math.sqrt((x - 120) ** 2 + (y - 120) ** 2) <= 120 for x in range(240)]
-            for y in range(240)
+            [
+                math.sqrt((x - OLED_SIZE // 2) ** 2 + (y - OLED_SIZE // 2) ** 2)
+                <= OLED_SIZE // 2
+                for x in range(OLED_SIZE)
+            ]
+            for y in range(OLED_SIZE)
         ]
         # Now, we iterate the mask row-by-row and find the first True bit in
         # it. The offset within that row is our per-row offset for the
@@ -457,14 +471,14 @@ class Simulation:
         surface.fill((0, 0, 0, 0))
         buf = surface.get_buffer()
 
-        fb = fb[: 240 * 240 * 4]
-        for y in range(240):
+        fb = fb[: OLED_SIZE * OLED_SIZE * 4]
+        for y in range(OLED_SIZE):
             # Use precalculated row offset to turn OLED disc into square
             # bounded plane.
             offset = self._oled_offset[y]
-            start_offs_bytes = y * 240 * 4
+            start_offs_bytes = y * OLED_SIZE * 4
             start_offs_bytes += offset * 4
-            end_offs_bytes = (y + 1) * 240 * 4
+            end_offs_bytes = (y + 1) * OLED_SIZE * 4
             end_offs_bytes -= offset * 4
             buf.write(bytes(fb[start_offs_bytes:end_offs_bytes]), start_offs_bytes)
 
@@ -481,28 +495,40 @@ class Simulation:
         need_overlays = False
         if self._led_surface_dirty or self._petal_surface_dirty:
             full.fill((0, 0, 0, 255))
-            full.blit(background, (0, 0))
+            if not FULL_SCREEN:
+                full.blit(background, (0, 0))
             need_overlays = True
 
         if self._led_surface_dirty:
-            self._render_leds(self._led_surface)
+            if not FULL_SCREEN:
+                self._render_leds(self._led_surface)
             self._led_surface_dirty = False
         if need_overlays:
             full.blit(self._led_surface, (0, 0), special_flags=pygame.BLEND_ADD)
 
         if self._petal_surface_dirty:
-            self._render_petal_markers(self._petal_surface)
+            if not FULL_SCREEN:
+                self._render_petal_markers(self._petal_surface)
             self._petal_surface_dirty = False
         if need_overlays:
-            full.blit(self._petal_surface, (0, 0))
+            if not FULL_SCREEN:
+                full.blit(self._petal_surface, (0, 0))
 
         # Always blit oled. Its' alpha blending is designed in a way that it
         # can be repeatedly applied to a dirty _full_surface without artifacts.
-        center_x = 408
-        center_y = 426
-        off_x = center_x - (240 // 2)
-        off_y = center_y - (240 // 2)
-        full.blit(self._oled_surface, (off_x, off_y))
+        center_x = screen_w // 2
+        center_y = screen_h // 2
+        if FULL_SCREEN:
+            size_x = screen_h * OLED_ASPECT * OLED_SCALE
+            size_y = screen_h * OLED_SCALE
+            off_x = center_x - (size_x // 2)
+            off_y = center_y - (size_y // 2)
+            new = pygame.transform.scale(self._oled_surface, (size_x, size_y))
+            full.blit(new, (off_x, off_y))
+        else:
+            off_x = center_x - (OLED_SIZE // 2)
+            off_y = center_y - (OLED_SIZE // 2)
+            full.blit(self._oled_surface, (off_x, off_y))
 
         screen.blit(full, (0, 0))
         pygame.display.flip()
@@ -554,8 +580,21 @@ class FramebufferManager:
         # (difference between ~10FPS and 500+FPS!).
 
         for _ in range(1):
-            fb, c = ctx._wasm.ctx_new_for_framebuffer(240, 240, 240 * 4, ctx.RGBA8)
-            ctx._wasm.ctx_apply_transform(c, 1, 0, 120, 0, 1, 120, 0, 0, 1)
+            fb, c = ctx._wasm.ctx_new_for_framebuffer(
+                OLED_SIZE, OLED_SIZE, OLED_SIZE * 4, ctx.RGBA8
+            )
+            ctx._wasm.ctx_apply_transform(
+                c,
+                OLED_SIZE / 240,
+                0,
+                OLED_SIZE / 2,
+                0,
+                OLED_SIZE / 240,
+                OLED_SIZE / 2,
+                0,
+                0,
+                1,
+            )
             self._free.append((fb, c))
 
         self._overlay = ctx._wasm.ctx_new_for_framebuffer(240, 240, 240 * 4, ctx.RGBA8)

@@ -156,6 +156,16 @@ def sim_main():
         help="Generate a flow3r.png screenshot.",
     )
     parser.add_argument(
+        "--full-screen",
+        dest="full_screen",
+        action="store_true",
+        default=False,
+        help="Run the simulator as full-screen OLED display.",
+    )
+    parser.add_argument("--oled-size", dest="oled_size", default=240)
+    parser.add_argument("--oled-aspect", dest="oled_aspect", default=1)
+    parser.add_argument("--oled-scale", dest="oled_scale", default=1)
+    parser.add_argument(
         "override_app",
         nargs="?",
         help="Bundle to start instead of the main menu. "
@@ -163,6 +173,10 @@ def sim_main():
     )
     args = parser.parse_args()
 
+    os.environ["SIM_FULL_SCREEN"] = "1" if args.full_screen else "0"
+    os.environ["SIM_OLED_SIZE"] = str(args.oled_size)
+    os.environ["SIM_OLED_ASPECT"] = str(args.oled_aspect)
+    os.environ["SIM_OLED_SCALE"] = str(args.oled_scale)
     import _sim
 
     _sim.SCREENSHOT = args.screenshot
