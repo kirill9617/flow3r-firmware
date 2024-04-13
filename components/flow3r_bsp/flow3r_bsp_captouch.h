@@ -22,8 +22,6 @@ typedef struct {
     // legacy
     int32_t pos_distance;
     int32_t pos_angle;
-    // move elsewhere someday, not external api
-    uint16_t raw[4];
 } flow3r_bsp_captouch_petal_data_t;
 
 typedef struct {

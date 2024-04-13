@@ -1,3 +1,13 @@
+// note: this code is kind of frankenstein'd out of the
+// remains of a refactor that introduced a lot of complexity
+// that wasn't needed anymore.
+//
+// it was an entire thing and we were exhausted and we did not
+// clean this up properly. it works, and that's enough for now.
+//
+// also there is still a major state machine missing so we
+// don't see good reason to improve structure at this point.
+
 #include "flow3r_bsp_ad7147.h"
 #include "flow3r_bsp_ad7147_hw.h"
 #include "flow3r_bsp_captouch.h"
@@ -27,30 +37,55 @@
 #include "esp_timer.h"
 #endif
 
-static SemaphoreHandle_t _mu = NULL;
-static SemaphoreHandle_t _cursed_mu = NULL;
-
 static const char *TAG = "flow3r-bsp-ad7147";
+
+// output data that gets continuously written to and
+// memcpy'd when the user requests.
+static flow3r_bsp_captouch_data_t captouch_data;
+// lock for captouch_data
+static SemaphoreHandle_t captouch_output_lock = NULL;
+// task that generates captouch_data
+static TaskHandle_t _captouch_task_handle = NULL;
+// helper task for the bottom chip
+static TaskHandle_t _cursed_task_handle = NULL;
+// container for unprocessed petal data and its lock.
+// 10 petals, 4 potential pad positions according to
+// petal_kind_t. some fields are never used.
+static uint16_t raw_petals[10][4];
+// lock for parts of raw_petals: only petal indices
+// that are served by the bottom chip (all uneven ones
+// and 2).
+static SemaphoreHandle_t raw_petal_bot_chip_lock = NULL;
 
 typedef struct {
     size_t petal_number;
     petal_kind_t pad_kind;
 } pad_mapping_t;
 
-static inline void petal_process(uint8_t index);
-static TaskHandle_t _captouch_task_handle = NULL;
-static TaskHandle_t _cursed_task_handle = NULL;
-
-static const int32_t _calib_target = 6000;
-static const int32_t _calib_incr_cap = 1000;
-
 typedef struct {
     bool press_event_new;
     bool fresh;
-} ad7147_press_latch;
+} press_latch_t;
 
-static ad7147_press_latch latch[10];
-static flow3r_bsp_captouch_data_t captouch_data;
+static press_latch_t latches[10];
+
+static inline void petal_process(uint8_t index);
+
+// DATASHEET VIOLATION 1
+// target value that we ideally wanna see from an idle petal.
+// this chip was designed for some sort  of (plastic) case
+// between electrode and finger so our signal is coming in
+// super hot and we need the extended headroom. datasheet
+// suggests to set this to halfpoint (32k).
+static const int32_t _calib_target = 6000;
+// this is what we assume one step in the chip's AFE
+// parameter does to the output reading. this value is used
+// in an iterative process so it doesn't have to be super
+// precise but it helps to be in the ballpark. we thiink
+// the real value is more like 970 but not sure how linear
+// this is. anyways, calibration works reasonably well with
+// this, let's never touch it again :D
+static const int32_t _calib_incr_cap = 1000;
 
 #if defined(CONFIG_FLOW3R_HW_GEN_P3)
 static const pad_mapping_t _map_top[12] = {
@@ -136,7 +171,6 @@ static gpio_num_t _interrupt_gpio_top = GPIO_NUM_15;
 static gpio_num_t _interrupt_gpio_bot = GPIO_NUM_16;
 static bool _interrupt_shared = false;
 #endif
-
 #else
 #error "captouch not implemented for this badge generation"
 #endif
@@ -163,27 +197,27 @@ void get_stage_hw_config(ad7147_chip_t *chip, ad7147_sequence_t *seq_out,
                          uint8_t i, uint8_t channel) {
     int8_t offset = chip->channels[channel].afe_offset;
     seq_out->stages[i].channel_mask = 1 << channel;
-    /*
-       the datasheet recommends to connect captouch pads to the internal bias
-       while they are not being measured. here's why we're not doing that:
+    // DATASHEET VIOLATION 2
+    // the datasheet recommends to connect captouch pads to the internal bias
+    // while they are not being measured. here's why we're not doing that:
+    //
+    // there was a strong cross talk issue on the bottom chip petals that
+    // varied with grounding setup (e.g., plugging in a usb cable and putting
+    // the other end in ur pocket changed behavior). we suspected that this
+    // might be due to a capacitive interaction between device ground, chip bias
+    // and chip shield driver. our wild theories were rewarded, and while
+    // introducing a bit of noise (well within budget, mind you) this resolved
+    // the issue.
+    //
+    // a few months later, a rare edge case was brought to our attention: when
+    // many channels on the top chip petals were saturated, similar cross talk
+    // could be generated. we applied the fix to the top chip too, and sure
+    // enough it resolved the issue. which makes sense except for fact that the
+    // top chip petals don't couple to a shield driver.
+    //
+    // we currently have no fully sensical mental model for why this works but
+    // that's okay.
 
-       there was a strong cross talk issue on the bottom chip petals that
-       varied with grounding setup (e.g., plugging in a usb cable and putting
-       the other end in ur pocket changed behavior). we suspected that this
-       might be due to a capacitive interaction between device ground, chip bias
-       and chip shield driver. our wild theories were rewarded, and while
-       introducing a bit of noise (well within budget, mind you) this resolved
-       the issue.
-
-        a few months later, a rare edge case was brought to our attention: when
-        many channels on the top chip petals were saturated, similar cross talk
-        could be generated. we applied the fix to the top chip too, and sure
-        enough it resolved the issue. which makes sense except for fact that the
-        top chip petals don't couple to a shield driver.
-
-        we currently have no fully sensical mental model for why this works but
-        that's okay.
-    */
     // datasheet recommendation-ish (13-seq has hardcoded bits that violate
     // this, change manually!)
     // seq_out->stages[i].idle_to_bias = true;
@@ -202,6 +236,7 @@ void get_stage_hw_config(ad7147_chip_t *chip, ad7147_sequence_t *seq_out,
     }
 }
 
+// bad hack, see below
 static esp_err_t _cursed_sequence_request(ad7147_chip_t *chip, bool init,
                                           bool recalib) {
     int8_t *seq = chip->sequence;
@@ -212,7 +247,12 @@ static esp_err_t _cursed_sequence_request(ad7147_chip_t *chip, bool init,
     return ESP_OK;
 }
 
-// Request current sequence from captouch chip.
+// This takes a sequence of stages from the chip config, gets
+// the configuration data for the individual stages
+// and writes it to the respective captouch chip.
+// In case of the bottom chip we request a 13-sequence, so that's
+// not possible, so we use a hardcoded hack to save the 13th
+// sequence step configuration data for later use.
 static esp_err_t _sequence_request(ad7147_chip_t *chip, bool init,
                                    bool recalib) {
     if (chip->is_bot) {
@@ -259,19 +299,35 @@ static bool _channel_afe_tweak(ad7147_chip_t *chip, size_t cix) {
     return true;
 }
 
+// Takes data from captouch chip readout, looks up which petal pad
+// it belongs to according to the chip map and puts it there.
+// May need to take lock for raw_petals access depending on circumstances
+// (atm just for bottom chip).
+// Should maybe get a proper name someday. Sorry. Only used by
+// raw_data_to_petal_pads atm, maybe it should just absorb it, it's
+// not that big.
 static void _on_chip_data(ad7147_chip_t *chip, uint16_t *values, size_t len) {
     assert(chip == &_top || chip == &_bot);
     bool top = chip == &_top;
     const pad_mapping_t *map = top ? _map_top : _map_bot;
 
     for (uint8_t i = 0; i < len; i++) {
-        flow3r_bsp_captouch_petal_data_t *petal =
-            &(captouch_data.petals[map[i].petal_number]);
-        petal->raw[map[i].pad_kind] = values[i];
+        raw_petals[map[i].petal_number][map[i].pad_kind] = values[i];
     }
 }
 
-// Called when a sequence is completed by the low-level layer.
+// Generates raw data and sends it to raw_petals[][].
+// Yes, raw data is processed. Hah. You have been lied to.
+// A summary of lies:
+// - While a calibration is running, data output isn't updated. This means
+//   we don't need to waste our time with updating raw_petals either. Not so
+//   bad right?
+// - Calibration is a composition of "coarse" hardware biasing (that AFE thing
+//   that  keeps popping up), plus a residual "fine" software offset.
+//   Since they both work in tandem, we decided to consider raw data whatever
+//   is left after both of them are applied, so raw_petals doesn't hold the
+//   raw readings, but already has the fine offset applied. This makes it
+//   considerably harder to forget to apply it.
 static void raw_data_to_petal_pads(ad7147_chip_t *chip, uint16_t *data,
                                    size_t len) {
     if (chip->calibration_cycles > 0) {
@@ -358,6 +414,7 @@ static void raw_data_to_petal_pads(ad7147_chip_t *chip, uint16_t *data,
     }
 }
 
+// could probably delete half of this but meh who cares
 esp_err_t flow3r_bsp_ad7147_chip_init(ad7147_chip_t *chip) {
     esp_err_t ret;
     for (size_t i = 0; i < chip->nchannels; i++) {
@@ -413,10 +470,20 @@ static void _notify(uint32_t mask, TaskHandle_t handle) {
     portYIELD();
 }
 
-static void _bot_isr(void *data) { _notify_from_isr(1, _cursed_task_handle); }
-
+// (sunshine emoji) tell the captouch task that top chip data is available :D
 static void _top_isr(void *data) { _notify_from_isr(2, _captouch_task_handle); }
 
+// (dark cloud emoji) tell the cursed task that it is time for THE PROCEDURE
+static void _bot_isr(void *data) { _notify_from_isr(1, _cursed_task_handle); }
+
+// So here's a thing to generally keep in mind with this driver:
+// It runs on interrupts. Which come from a hardware. Which
+// needs to know that the interrupt has been read in order to
+// be able to send another. So each time u receive an interrupt
+// you need to clear it else the machinery will just halt.
+// Unless maybe you put a timeout somewhere but that would be too
+// reasonable.
+// Not sure why we mention this here.
 static void _kickstart(void) {
     if (_captouch_task_handle == NULL) return;
     ulTaskNotifyValueClear(_captouch_task_handle, 0xffffffff);
@@ -430,6 +497,13 @@ static uint32_t _cursed_step_to_step_time[4];
 static uint32_t _cursed_step_execution_time[4];
 #endif
 
+// THE PROCEDURE
+// we need to reconfigure the bottom chip on the fly to read all 13 channels.
+// this here is pretty much a shim between the bottom chip isr and the main
+// captouch task that manages the i2c traffic to the bottom chip as well as
+// poking the main captouch task when data is ready.
+// this is kinda sensitive and overall weird so we keep our lil crappy profiler
+// hooked up for now, we're sure we'll need it in the future again.
 static bool _cursed_chip_process(ad7147_chip_t *chip, uint8_t *step,
                                  uint16_t *data) {
     ad7147_hw_t *device = &chip->dev;
@@ -437,45 +511,83 @@ static bool _cursed_chip_process(ad7147_chip_t *chip, uint8_t *step,
 #ifdef CAPTOUCH_PROFILING
     int64_t time = esp_timer_get_time();
 #endif
+    // this boi clears the interrupt flag of the captouch chip so it must
+    // run _every time_ we receive an interrupt. &st tells us which stages
+    // have been completed since the last call.
     if (!ad7147_hw_get_and_clear_completed(device, &st)) {
         return false;
     }
+    // since we can only reset the chip sequencer to stage 0, for the 13th
+    // stage the hardware interrupt should trigger when state 0 is completed.
+    // this is okay for all steps of the prodecure, so to keep i2c traffic low
+    // we have it hardcoded to that at all times.
     if (!(st & 1)) {
 #ifdef CAPTOUCH_PROFILING
+        // if u trigger this it's not bad, it just means that u generate more
+        // i2c traffic than absolutely necessary. remove bofh
+        // xTaskNotifyStateClear below for a demonstrations. with stock config
+        // this rarely triggers on step 1. don't really care to look into it.
         ESP_LOGE(TAG, "cursed chip isr clear fail (step %u, mask %u\n)",
                  (uint16_t)(*step), st);
 #endif
         return false;
     }
+    // let's pretend for fun that channel0 is read by stage0 and so forth.
+    // makes describing this a lot easier.
+    // also i2c traffic functions are highly golfed, pls don't tear them apart
+    // it saves like 1% cpu so be cool~
     switch (*step) {
         case 0:
+            // read all 12 "regular" channels into the array
             if (!ad7147_hw_get_cdc_data(device, data, 12)) {
                 return false;
             }
+            // reconfigures stage0 to channel 13 config, set up sequencer
+            // to loop only stage0 (<-actually a lie but dw abt it~)
             if (!ad7147_hw_modulate_stage0_and_reset(device,
                                                      &_cursed_swap_stage)) {
                 return false;
             }
+            // clear stray freertos interrupts, then clear hw interrupts.
+            // must be done in that order.
             xTaskNotifyStateClear(NULL);
             if (!ad7147_hw_get_and_clear_completed(device, &st)) {
                 return false;
             }
             break;
+        // case 1: the data right after reconfiguration might be junk
+        //         so we wait for another cycle.
         case 2:
+            // grab data for channel 13
             if (!ad7147_hw_get_cdc_data(device, &(data[12]), 1)) {
                 return false;
             }
+            // reconfigure stage0 to channel 0 config, set up sequencer
+            // to loop all stages
             if (!ad7147_hw_modulate_stage0_and_reset(device, NULL)) {
                 return false;
             }
+            // clear stray freertos interrupts, then clear hw interrupts.
+            // must be done in that order.
             xTaskNotifyStateClear(NULL);
             if (!ad7147_hw_get_and_clear_completed(device, &st)) {
                 return false;
             }
-            xSemaphoreTake(_cursed_mu, portMAX_DELAY);
+            // processing data here.
+            xSemaphoreTake(raw_petal_bot_chip_lock, portMAX_DELAY);
             raw_data_to_petal_pads(chip, data, 13);
-            xSemaphoreGive(_cursed_mu);
+            xSemaphoreGive(raw_petal_bot_chip_lock);
+            // notify the main captouch task that data is ready
+            _notify(1, _captouch_task_handle);
             break;
+            // case 3: "whoa whoa whoa if you do the same here as with case 1
+            //         you'd wait for the whole 12-sequence without any good
+            //         reason!"
+            // observant, but there's a hidden trick! both case2->case3 and
+            // case 3->case0 have the sequencer configure to 12 steps but
+            // consider: case 2 resets to stage0 (only stage we can reset to,
+            // remember?), and the next interrupt is triggered once that is
+            // complete! that is the magic of ISR trigger reconf laziness!
     }
 #ifdef CAPTOUCH_PROFILING
     _cursed_step_to_step_time[*step] = time - _cursed_step_time;
@@ -486,20 +598,17 @@ static bool _cursed_chip_process(ad7147_chip_t *chip, uint8_t *step,
     return true;
 }
 
+// wrapper/data storage for the above.
 static void _cursed_task(void *data) {
     uint8_t step = 0;
     uint16_t buffer[13];
     for (;;) {
-        uint32_t notif;
+        uint32_t notif;  // ignoring this
         if (xTaskNotifyWait(0, 3, &notif, portMAX_DELAY) == pdFALSE) {
             ESP_LOGE(TAG, "Notification receive failed: cursed task");
             continue;
         }
-        if (_cursed_chip_process(&_bot, &step, buffer)) {
-            if (!step) {
-                _notify(1, _captouch_task_handle);
-            }
-        }
+        _cursed_chip_process(&_bot, &step, buffer);
     }
 }
 
@@ -534,13 +643,43 @@ static void _task(void *data) {
             bot = true;
         }
 #endif
+        if (top) {
+            uint8_t top_chip_petals[] = { 0, 4, 6, 8 };
+            // _chip_process grabs data from i2c and writes it to
+            // the respective raw petal pad
+            if (_chip_process(&_top)) {
+                xSemaphoreTake(captouch_output_lock, portMAX_DELAY);
+                // this one processes the raw data to user-facing
+                // parameters (mostly "pressed" and "position")
+                for (uint8_t i = 0; i < 4; i++) {
+                    petal_process(top_chip_petals[i]);
+                }
+                xSemaphoreGive(captouch_output_lock);
+            }
+#ifdef CAPTOUCH_PROFILING
+            if (top_timer_index < 100) {
+                top_timer[top_timer_index] = esp_timer_get_time();
+                top_timer_index++;
+            } else {
+                int32_t avg = top_timer[99] - top_timer[3];
+                avg /= 1000 * (99 - 3);
+                printf("average top captouch cycle time: %ldms\n", avg);
+                top_timer_index = 0;
+            }
+#endif
+        }
         if (bot) {
             uint8_t bot_chip_petals[] = { 1, 2, 3, 5, 7, 9 };
-            xSemaphoreTake(_cursed_mu, portMAX_DELAY);
+            // same as top, but _chip_process has been done already by
+            // the helper task - we do need to grab an extra lock tho
+            xSemaphoreTake(captouch_output_lock, portMAX_DELAY);
+            // grab this one l8r bc higher prio
+            xSemaphoreTake(raw_petal_bot_chip_lock, portMAX_DELAY);
             for (uint8_t i = 0; i < 6; i++) {
                 petal_process(bot_chip_petals[i]);
             }
-            xSemaphoreGive(_cursed_mu);
+            xSemaphoreGive(raw_petal_bot_chip_lock);
+            xSemaphoreGive(captouch_output_lock);
 #ifdef CAPTOUCH_PROFILING
             if (bot_timer_index < 100) {
                 bot_timer[bot_timer_index] = esp_timer_get_time();
@@ -559,25 +698,6 @@ static void _task(void *data) {
                     printf("last bot step %u execution time: %luus\n", i,
                            _cursed_step_execution_time[i]);
                 }
-            }
-#endif
-        }
-        if (top) {
-            uint8_t top_chip_petals[] = { 0, 4, 6, 8 };
-            if (_chip_process(&_top)) {
-                for (uint8_t i = 0; i < 4; i++) {
-                    petal_process(top_chip_petals[i]);
-                }
-            }
-#ifdef CAPTOUCH_PROFILING
-            if (top_timer_index < 100) {
-                top_timer[top_timer_index] = esp_timer_get_time();
-                top_timer_index++;
-            } else {
-                int32_t avg = top_timer[99] - top_timer[3];
-                avg /= 1000 * (99 - 3);
-                printf("average top captouch cycle time: %ldms\n", avg);
-                top_timer_index = 0;
             }
 #endif
         }
@@ -603,12 +723,12 @@ esp_err_t _gpio_interrupt_setup(gpio_num_t num, gpio_isr_t isr) {
 }
 
 esp_err_t flow3r_bsp_ad7147_init() {
-    assert(_mu == NULL);
-    _mu = xSemaphoreCreateMutex();
-    assert(_mu != NULL);
-    assert(_cursed_mu == NULL);
-    _cursed_mu = xSemaphoreCreateMutex();
-    assert(_cursed_mu != NULL);
+    assert(captouch_output_lock == NULL);
+    captouch_output_lock = xSemaphoreCreateMutex();
+    assert(captouch_output_lock != NULL);
+    assert(raw_petal_bot_chip_lock == NULL);
+    raw_petal_bot_chip_lock = xSemaphoreCreateMutex();
+    assert(raw_petal_bot_chip_lock != NULL);
 
     esp_err_t ret;
 
@@ -702,17 +822,18 @@ void flow3r_bsp_ad7147_set_calibration_data(int32_t *data) {
 }
 
 void flow3r_bsp_ad7147_get(flow3r_bsp_captouch_data_t *dest) {
-    xSemaphoreTake(_mu, portMAX_DELAY);
+    xSemaphoreTake(captouch_output_lock, portMAX_DELAY);
     memcpy(dest, &captouch_data, sizeof(captouch_data));
-    xSemaphoreGive(_mu);
+    xSemaphoreGive(captouch_output_lock);
 }
+
 void flow3r_bsp_ad7147_refresh_events() {
-    xSemaphoreTake(_mu, portMAX_DELAY);
+    xSemaphoreTake(captouch_output_lock, portMAX_DELAY);
     for (uint8_t i = 0; i < 10; i++) {
-        captouch_data.petals[i].press_event = latch[i].press_event_new;
-        latch[i].fresh = true;
+        captouch_data.petals[i].press_event = latches[i].press_event_new;
+        latches[i].fresh = true;
     }
-    xSemaphoreGive(_mu);
+    xSemaphoreGive(captouch_output_lock);
 }
 
 // roughly matches the behavior of the legacy api. someday we should have more
@@ -728,10 +849,10 @@ void flow3r_bsp_ad7147_refresh_events() {
 
 static inline void petal_process(uint8_t index) {
     flow3r_bsp_captouch_petal_data_t *petal = &(captouch_data.petals[index]);
-    int32_t tip = petal->raw[petal_pad_tip];
-    int32_t cw = petal->raw[petal_pad_cw];
-    int32_t ccw = petal->raw[petal_pad_ccw];
-    int32_t base = petal->raw[petal_pad_base];
+    int32_t tip = raw_petals[index][petal_pad_tip];
+    int32_t cw = raw_petals[index][petal_pad_cw];
+    int32_t ccw = raw_petals[index][petal_pad_ccw];
+    int32_t base = raw_petals[index][petal_pad_base];
     bool top = (index % 2) == 0;
     int32_t thres = top ? (TOP_PETAL_THRESHOLD) : (BOTTOM_PETAL_THRESHOLD);
     thres =
@@ -765,9 +886,9 @@ static inline void petal_process(uint8_t index) {
         petal->raw_coverage = 0;              // 0
     }                                         // TODO: undo
 
-    if ((!latch[index].press_event_new) || latch[index].fresh) {
-        latch[index].press_event_new = petal->pressed;
-        latch[index].fresh = false;
+    if ((!latches[index].press_event_new) || latches[index].fresh) {
+        latches[index].press_event_new = petal->pressed;
+        latches[index].fresh = false;
     }
     int8_t f_div_pow = 4;
     int8_t f_mult_old = 9;
