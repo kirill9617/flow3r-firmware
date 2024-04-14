@@ -93,6 +93,21 @@ class MenuItemAction(MenuItem):
     def label(self) -> str:
         return self._label
 
+class MenuItemActionUpdate(MenuItemAction):
+    """
+    A MenuItem which runs the provided lambda action and updates its label with the return value.
+    """
+
+    def __init__(self, label: str, action: Callable[[], None]) -> None:
+        self._label = label
+        self._action = action
+
+    def press(self, vm: Optional[ViewManager]) -> None:
+        self._label = self._action()
+
+    def label(self) -> str:
+        return self._label
+
 
 class MenuItemLaunchPersistentView(MenuItem):
     """
