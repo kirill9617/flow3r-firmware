@@ -15,15 +15,18 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#define CAPTOUCH_POSITIONAL_RINGBUFFER_LENGTH 8
+#define CAPTOUCH_POS_FILT_LEN 8
+#define CAPTOUCH_POS_EXTRA_LEN 6
+#define CAPTOUCH_POS_RING_LEN \
+    ((CAPTOUCH_POS_FILT_LEN) + (CAPTOUCH_POS_EXTRA_LEN))
 
 typedef struct {
     uint8_t index;
-    bool pressed;
     bool press_event;
     // ringbuffers with historical positional data
-    int16_t rad_ring[CAPTOUCH_POSITIONAL_RINGBUFFER_LENGTH];
-    int16_t phi_ring[CAPTOUCH_POSITIONAL_RINGBUFFER_LENGTH];
+    bool pressed[CAPTOUCH_POS_RING_LEN];
+    int16_t rad_ring[CAPTOUCH_POS_RING_LEN];
+    int16_t phi_ring[CAPTOUCH_POS_RING_LEN];
     // index for latest data in ringbuffers above, smaller
     // indices (wrapped around) are further in the past
     uint8_t last_ring;

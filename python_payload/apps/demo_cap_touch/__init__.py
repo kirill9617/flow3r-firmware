@@ -16,8 +16,10 @@ import captouch
 
 class Dot:
     def __init__(self):
-        self.size = 0
-        self.pos = 0.0j
+        self.rad_ref = None
+        self.phi_ref = None
+        self.status = 0
+        self.pos = 0j
 
 
 class CapTouchDemo(Application):
@@ -32,7 +34,9 @@ class CapTouchDemo(Application):
         self.tinymenu_position = 0
         self.tinymenu_state = 0
         self.smooth = 1
-        self.hold = False
+        self.drop_first = 0
+        self.drop_last = 0
+        self.mode = 0
         self.shadow_index = 0
         self.shadow_list = [1, 0.35, 0.14, 0.06]
 
@@ -54,35 +58,66 @@ class CapTouchDemo(Application):
                     if lr_dir:
                         if self.tinymenu_state == 1:
                             self.tinymenu_position += lr_dir
-                            self.tinymenu_position %= 4
+                            self.tinymenu_position %= 6
                         elif self.tinymenu_state == 2:
                             if self.tinymenu_position == 0:
+                                self.mode += lr_dir
+                                self.mode %= 3
+                            elif self.tinymenu_position == 1:
                                 self.smooth += lr_dir
                                 self.smooth %= 5
-                            elif self.tinymenu_position == 1:
-                                self.hold = not self.hold
                             elif self.tinymenu_position == 2:
+                                self.drop_first += lr_dir
+                                self.drop_first %= 4
+                            elif self.tinymenu_position == 3:
+                                self.drop_last += lr_dir
+                                self.drop_last %= 4
+                            elif self.tinymenu_position == 4:
                                 self.shadow_index += lr_dir
                                 self.shadow_index %= len(self.shadow_list)
-                            elif self.tinymenu_position == 3:
+                            elif self.tinymenu_position == 5:
                                 if lr_dir == 1:
                                     self.tinymenu_state = 0
                                     self.state = 1
             for i in range(10):
                 top = not (i % 2)
                 petal = ins.captouch.petals[i]
-                rad = petal.get_rad(smooth=self.smooth)
-                phi = petal.get_phi(smooth=self.smooth)
-                if rad is None:
-                    self.dots[i].size = 4
-                    if not self.hold:
-                        self.dots[i].pos = 0
+                rad = petal.get_rad(
+                    smooth=self.smooth,
+                    drop_first=self.drop_first,
+                    drop_last=self.drop_last,
+                )
+                phi = petal.get_phi(
+                    smooth=self.smooth,
+                    drop_first=self.drop_first,
+                    drop_last=self.drop_last,
+                )
+                if (not petal.pressed) or rad is None:
+                    self.dots[i].status = int(petal.pressed)
+                    self.dots[i].rad_ref = None
+                    self.dots[i].phi_ref = None
+                    if self.mode == 0:
+                        self.dots[i].pos = 0j
                 else:
-                    self.dots[i].size = 8
-                    if phi is None:
+                    self.dots[i].status = 2
+                    if not top:
                         phi = 0
+                    if self.mode == 2:
+                        if self.dots[i].rad_ref is None:
+                            self.dots[i].rad_ref = rad - self.dots[i].pos.real
+                            self.dots[i].phi_ref = phi + self.dots[i].pos.imag
+                        rad -= self.dots[i].rad_ref
+                        phi -= self.dots[i].phi_ref
+                        if rad > 1:
+                            rad = 1
+                        elif rad < -1:
+                            rad = -1
+                        if phi > 1:
+                            phi = 1
+                        elif phi < -1:
+                            phi = -1
                     self.dots[i].pos = rad - phi * 1j
-                    print(f"rad: {rad}, phi: {phi}")
+                    # print(f"rad: {rad}, phi: {phi}")
         elif self.state == 1:
             if press_event:
                 if self.button == ins.buttons.PRESSED_DOWN:
@@ -100,7 +135,7 @@ class CapTouchDemo(Application):
                 self.state = 0
 
     def draw_dot(self, i, ctx):
-        s = self.dots[i].size
+        s = self.dots[i].status
 
         x = 70 + 35 * self.dots[i].pos
         rot = cmath.exp(-2j * math.pi * i / 10)
@@ -110,8 +145,16 @@ class CapTouchDemo(Application):
             ctx.rgb(0.0, 0.8, 0.8)
         else:
             ctx.rgb(1.0, 0.0, 1.0)
-        ctx.arc(x.imag, x.real, s / 2, 0, math.tau, 1)
-        ctx.fill()
+        if s == 2:
+            ctx.arc(x.imag, x.real, 4, 0, math.tau, 1).fill()
+            """
+        elif s == 1:
+            ctx.arc(x.imag, x.real, 4, 0, math.tau, 1).fill()
+            ctx.rgb(0.0, 0.0, 0.0)
+            ctx.arc(x.imag, x.real, 2, 0, math.tau, 1).fill()
+            """
+        else:
+            ctx.arc(x.imag, x.real, 2, 0, math.tau, 1).fill()
 
     def draw_tinymenu(self, ctx):
         if not self.tinymenu_state:
@@ -127,15 +170,21 @@ class CapTouchDemo(Application):
         descr = "???"
         value = "???"
         if self.tinymenu_position == 0:
+            descr = "mode"
+            value = ["std", "hold", "drag"][self.mode]
+        elif self.tinymenu_position == 1:
             descr = "smooth"
             value = str(self.smooth)
-        elif self.tinymenu_position == 1:
-            descr = "hold"
-            value = "on" if self.hold else "off"
         elif self.tinymenu_position == 2:
+            descr = "drop:F"
+            value = str(self.drop_first)
+        elif self.tinymenu_position == 3:
+            descr = "drop:L"
+            value = str(self.drop_last)
+        elif self.tinymenu_position == 4:
             descr = "shadow"
             value = str(self.shadow_index)
-        elif self.tinymenu_position == 3:
+        elif self.tinymenu_position == 5:
             descr = "calib"
             value = "go ->"
         if self.tinymenu_state == 1:

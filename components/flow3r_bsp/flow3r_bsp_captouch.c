@@ -38,47 +38,87 @@ void flow3r_bsp_captouch_init() {
 
 typedef struct {
     uint8_t len;
-    int32_t coeff[CAPTOUCH_POSITIONAL_RINGBUFFER_LENGTH];
+    uint8_t min_len;
+    int32_t coeff[CAPTOUCH_POS_FILT_LEN];
 } _ir_t;
 
 static _ir_t filters[] = {
     {
         .len = 1,
+        .min_len = 1,
         .coeff = { 256 },
     },
     {
         .len = 4,
+        .min_len = 2,
         .coeff = { 135, 69, 35, 17 },
     },
     {
         .len = 5,
+        .min_len = 2,
         .coeff = { 90, 89, 44, 22, 11 },
     },
     {
         .len = 6,
+        .min_len = 3,
         .coeff = { 69, 57, 46, 36, 28, 20 },
     },
     {
         .len = 8,
+        .min_len = 4,
         .coeff = { 32, 32, 32, 32, 32, 32, 32, 32 },
     },
 };
 
 static uint8_t num_filters = sizeof(filters) / sizeof(_ir_t);
 
+#define ring_decr(X, Y) \
+    ((X + CAPTOUCH_POS_RING_LEN - Y) % CAPTOUCH_POS_RING_LEN)
+
 static float _get_pos(flow3r_bsp_captouch_petal_data_t *petal, uint8_t smooth,
                       uint8_t drop_first, uint8_t drop_last, int16_t *ring) {
-    if (!petal->press_event) return NAN;
-    uint8_t len = CAPTOUCH_POSITIONAL_RINGBUFFER_LENGTH;
+    uint8_t start_ring = petal->last_ring;
+
+    // drop_last
+    // to drop the last n samples we must delay the signal by n samples.
+    // we then simply return NAN as soon as the first !pressed appears.
+    drop_last %= 4;
+    for (uint8_t i = 0; i < drop_last; i++) {
+        if (!petal->pressed[start_ring]) return NAN;
+        start_ring = ring_decr(start_ring, 1);
+    }
+
+    // drop_first
+    // we apply a tiny hack later in the filter:
+    // normally, the filter would check if a sample that it's about to process
+    // is (i.e. pressed). for convenience we hijack this and make it look ahead
+    // by drop_first ringbuffer steps.
+    // since this means we're not checking the first drop_first ringbuffer steps
+    // at that time anymore we do it here in advance.
+    drop_first %= 4;
+    for (uint8_t i = 0, index = start_ring; i < drop_first; i++) {
+        if (!petal->pressed[index]) return NAN;
+        index = ring_decr(index, 1);
+    }
+
     smooth = smooth > (num_filters - 1) ? (num_filters - 1) : smooth;
     _ir_t *filter = &(filters[smooth]);
-
+    // apply filter
     int32_t acc = 0;
-    for (uint8_t i = 0; i < filter->len; i++) {
-        uint8_t index = petal->last_ring - i;
-        index = (index + len) % len;
+    for (uint8_t i = 0, index = start_ring; i < filter->len; i++) {
+        if (!petal->pressed[ring_decr(index, drop_first)]) {
+            // the filter may "overflow" to newer data for quicker startup
+            // in exchange for slightly higher initial noise.
+            // we're still going through all addition steps to make sure
+            // it's unity gain.
+            if (i < filter->min_len) return NAN;
+            index = start_ring;
+        }
         acc += ring[index] * filter->coeff[i];
+        index = ring_decr(index, 1);
     }
+
+    // formatting: convert to [-1..1] floats
     float ret = acc / 256;
     ret = (ret * 2 + 1) / 65535;  // ocd, sorry
     return ret > 1.0 ? 1.0 : (ret < -1.0 ? -1.0 : ret);

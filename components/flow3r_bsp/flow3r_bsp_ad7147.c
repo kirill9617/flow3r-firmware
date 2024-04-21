@@ -860,8 +860,8 @@ static inline void petal_process(uint8_t index) {
     int32_t base = raw_petals[index][petal_pad_base];
     bool top = (index % 2) == 0;
     int32_t thres = top ? (TOP_PETAL_THRESHOLD) : (BOTTOM_PETAL_THRESHOLD);
-    thres =
-        petal->pressed ? thres - (PETAL_HYSTERESIS) : thres;  // some hysteresis
+    bool pressed_prev = petal->pressed[petal->last_ring];
+    thres = pressed_prev ? thres - (PETAL_HYSTERESIS) : thres;
     int32_t rad;
     int32_t phi;
     int32_t raw_sum;
@@ -885,15 +885,15 @@ static inline void petal_process(uint8_t index) {
 #if defined(CONFIG_FLOW3R_HW_GEN_P3)
     if (top) rad = -rad;
 #endif
-    petal->pressed = raw_sum > thres;
-    if (petal->pressed) {  // backwards compat hack for the few ppl who use
+    bool pressed = raw_sum > thres;
+    if (pressed) {  // backwards compat hack for the few ppl who use
         petal->raw_coverage = raw_sum / div;  // it as a "pressed" proxy
     } else {                                  // by comparing it to
         petal->raw_coverage = 0;              // 0
     }                                         // TODO: undo
 
     if ((!latches[index].press_event_new) || latches[index].fresh) {
-        latches[index].press_event_new = petal->pressed;
+        latches[index].press_event_new = pressed;
         latches[index].fresh = false;
     }
     // value range fine tuning
@@ -908,8 +908,8 @@ static inline void petal_process(uint8_t index) {
     }
     rad = rad > 32767 ? 32767 : (rad < -32768 ? -32768 : rad);
     phi = phi > 32767 ? 32767 : (phi < -32768 ? -32768 : phi);
-    petal->last_ring =
-        (petal->last_ring + 1) % (CAPTOUCH_POSITIONAL_RINGBUFFER_LENGTH);
+    petal->last_ring = (petal->last_ring + 1) % (CAPTOUCH_POS_RING_LEN);
+    petal->pressed[petal->last_ring] = pressed;
     petal->rad_ring[petal->last_ring] = rad;
     petal->phi_ring[petal->last_ring] = phi;
 }
