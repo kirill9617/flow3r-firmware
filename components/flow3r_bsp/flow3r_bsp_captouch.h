@@ -15,13 +15,23 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#define CAPTOUCH_POSITIONAL_RINGBUFFER_LENGTH 8
+
 typedef struct {
+    uint8_t index;
     bool pressed;
     bool press_event;
+    // ringbuffers with historical positional data
+    int16_t rad_ring[CAPTOUCH_POSITIONAL_RINGBUFFER_LENGTH];
+    int16_t phi_ring[CAPTOUCH_POSITIONAL_RINGBUFFER_LENGTH];
+    // index for latest data in ringbuffers above, smaller
+    // indices (wrapped around) are further in the past
+    uint8_t last_ring;
+    // move elsewhere someday, not external api
+    uint16_t raw[4];
+    // used to be called pressure but it's not a good proxy.
+    // apply grains of salt generously.
     uint16_t raw_coverage;
-    // legacy
-    int32_t pos_distance;
-    int32_t pos_angle;
 } flow3r_bsp_captouch_petal_data_t;
 
 typedef struct {
@@ -43,3 +53,9 @@ bool flow3r_bsp_captouch_calibrating();
 // Set/get calibration data. data[] should be at least 52 entries long.
 void flow3r_bsp_captouch_get_calibration_data(int32_t *data);
 void flow3r_bsp_captouch_set_calibration_data(int32_t *data);
+float flow3r_bsp_captouch_get_rad(flow3r_bsp_captouch_petal_data_t *petal,
+                                  uint8_t smooth, uint8_t drop_first,
+                                  uint8_t drop_last);
+float flow3r_bsp_captouch_get_phi(flow3r_bsp_captouch_petal_data_t *petal,
+                                  uint8_t smooth, uint8_t drop_first,
+                                  uint8_t drop_last);

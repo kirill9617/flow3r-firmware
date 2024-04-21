@@ -187,8 +187,9 @@ static ad7147_chip_t _bot = {
     .is_bot = true,
     // don't change this field pls there's a bunch of hardcoded stuff around :3
     .nchannels = 13,
-    // first and last must be >= 7 bc i2c golf reasons
-    .sequence = { 8, 0, 1, 2, 3, 4, 5, 6, 7, 10, 11, 12, 9 },
+    // first and last must be >= 7 bc i2c golf reasons.
+    // keeping petal 2 away from the swap helps w noise a bit.
+    .sequence = { 8, 0, 1, 2, 3, 10, 11, 12, 4, 5, 6, 7, 9 },
 };
 
 static ad7147_sequence_stage_t _cursed_swap_stage;
@@ -732,6 +733,10 @@ esp_err_t flow3r_bsp_ad7147_init() {
 
     esp_err_t ret;
 
+    for (uint8_t i = 0; i < 10; i++) {
+        captouch_data.petals[i].index = i;
+    }
+
     _top.dev.dev_config.decimation = 0b01;
     _top.dev.addr = flow3r_i2c_addresses.touch_top;
     _bot.dev.dev_config.decimation = 0b10;
@@ -857,27 +862,28 @@ static inline void petal_process(uint8_t index) {
     int32_t thres = top ? (TOP_PETAL_THRESHOLD) : (BOTTOM_PETAL_THRESHOLD);
     thres =
         petal->pressed ? thres - (PETAL_HYSTERESIS) : thres;  // some hysteresis
-    int32_t distance;
-    int32_t angle;
+    int32_t rad;
+    int32_t phi;
     int32_t raw_sum;
     int8_t div;
     if (top) {
         raw_sum = base + ccw + cw;
         div = 3;
         tip = (ccw + cw) >> 1;
-        angle = cw - ccw;
-        angle *= (POS_AMPLITUDE) >> (POS_AMPLITUDE_SHIFT);
-        angle /= ((cw + ccw) >> (POS_AMPLITUDE_SHIFT)) + (POS_DIV_MIN);
+        phi = cw - ccw;
+        phi *= (POS_AMPLITUDE) >> (POS_AMPLITUDE_SHIFT);
+        phi /= ((cw + ccw) >> (POS_AMPLITUDE_SHIFT)) + (POS_DIV_MIN);
     } else {
+        base += ((base * 3) >> 2);  // tiny gain correction
         raw_sum = base + tip;
         div = 2;
-        angle = 0;
+        phi = 0;
     }
-    distance = tip - base;
-    distance *= (POS_AMPLITUDE) >> (POS_AMPLITUDE_SHIFT);
-    distance /= ((tip + base) >> (POS_AMPLITUDE_SHIFT)) + (POS_DIV_MIN);
+    rad = tip - base;
+    rad *= (POS_AMPLITUDE) >> (POS_AMPLITUDE_SHIFT);
+    rad /= ((tip + base) >> (POS_AMPLITUDE_SHIFT)) + (POS_DIV_MIN);
 #if defined(CONFIG_FLOW3R_HW_GEN_P3)
-    if (top) distance = -distance;
+    if (top) rad = -rad;
 #endif
     petal->pressed = raw_sum > thres;
     if (petal->pressed) {  // backwards compat hack for the few ppl who use
@@ -890,11 +896,20 @@ static inline void petal_process(uint8_t index) {
         latches[index].press_event_new = petal->pressed;
         latches[index].fresh = false;
     }
-    int8_t f_div_pow = 4;
-    int8_t f_mult_old = 9;
-    int8_t f_mult_new = (1 << f_div_pow) - f_mult_old;
-    petal->pos_distance =
-        (f_mult_old * petal->pos_distance + f_mult_new * distance) >> f_div_pow;
-    petal->pos_angle =
-        (f_mult_old * petal->pos_angle + f_mult_new * angle) >> f_div_pow;
+    // value range fine tuning
+    if (index == 2) {
+        rad = (rad * 19) >> 4;
+        phi = (phi * 19) >> 4;
+    } else if (top) {
+        rad = (rad * 15) >> 4;
+        phi = (phi * 15) >> 4;
+    } else {
+        rad = (rad * 42) >> 5;
+    }
+    rad = rad > 32767 ? 32767 : (rad < -32768 ? -32768 : rad);
+    phi = phi > 32767 ? 32767 : (phi < -32768 ? -32768 : phi);
+    petal->last_ring =
+        (petal->last_ring + 1) % (CAPTOUCH_POSITIONAL_RINGBUFFER_LENGTH);
+    petal->rad_ring[petal->last_ring] = rad;
+    petal->phi_ring[petal->last_ring] = phi;
 }

@@ -21,16 +21,17 @@ class Dot:
         self.real = real
 
     def draw(self, i: int, ctx: Context) -> None:
-        imag = self.imag
-        real = self.real
-        size = self.size
+        s = self.size
+        x = -self.imag
+        y = -self.real
 
-        col = (1.0, 0.0, 1.0)
         if i % 2:
-            col = (0.0, 0.8, 0.8)
-        ctx.rgb(*col).rectangle(
-            -int(imag - (size / 2)), -int(real - (size / 2)), size, size
-        ).fill()
+            ctx.rgb(0.0, 0.8, 0.8)
+        else:
+            ctx.rgb(1.0, 0.0, 1.0)
+        # ctx.rectangle(x-s/2, y-s/2, s, s)
+        ctx.arc(x, y, s / 2, 0, math.tau, 1)
+        ctx.fill()
 
 
 class CapTouchDemo(Application):
@@ -41,6 +42,8 @@ class CapTouchDemo(Application):
         self.state = 0
         self.timer = 0
         self.button = None
+        self.filter = 1
+        self.full_redraw = True
 
     def think(self, ins: InputState, delta_ms: int) -> None:
         super().think(ins, delta_ms)
@@ -49,20 +52,31 @@ class CapTouchDemo(Application):
         else:
             press_event = False
         self.button = int(ins.buttons.app)
-        if press_event:
-            print(self.button)
         if self.state == 0:
             if press_event:
-                self.state = 1
+                if self.button == ins.buttons.PRESSED_DOWN:
+                    self.state = 1
+                elif self.button == ins.buttons.PRESSED_LEFT:
+                    self.filter -= 1
+                    self.filter %= 5
+                elif self.button == ins.buttons.PRESSED_RIGHT:
+                    self.filter += 1
+                    self.filter %= 5
             self.dots = []
             for i in range(10):
+                top = not (i % 2)
                 petal = ins.captouch.petals[i]
-                (rad, phi) = petal.position
+                rad = petal.get_rad(smooth=self.filter)
+                phi = petal.get_phi(smooth=self.filter)
+                if phi is None:
+                    phi = 0
+                if rad is None:
+                    rad = 0
                 size = 4
                 if petal.pressed:
                     size += 4
-                x = 70 + (rad / 1000) + 0j
-                x += ((-phi) / 600) * 1j
+                    print(f"rad: {rad}, phi: {phi}")
+                x = 70 + (rad * 35) + ((-phi) * 35) * 1j
                 rot = cmath.exp(-2j * math.pi * i / 10)
                 x = x * rot
                 self.dots.append(Dot(size, x.imag, x.real))
@@ -83,12 +97,26 @@ class CapTouchDemo(Application):
                 self.state = 0
 
     def draw(self, ctx: Context) -> None:
-        ctx.rgb(0, 0, 0).rectangle(-120, -120, 240, 240).fill()
+        ctx.rgb(0, 0, 0).rectangle(-120, -120, 240, 240)
         if self.state == 0:
+            if self.full_redraw:
+                ctx.fill()
+                self.full_redraw = False
+            else:
+                ctx.global_alpha = 0.2
+                ctx.fill()
+                ctx.global_alpha = 1
             for i, dot in enumerate(self.dots):
                 dot.draw(i, ctx)
-        else:
             ctx.rgb(0, 0.8, 0.8)
+            ctx.text_align = ctx.CENTER
+            ctx.font_size = 14
+            ctx.move_to(0, 7)
+            ctx.text(str(self.filter))
+        else:
+            ctx.fill()
+            ctx.rgb(0, 0, 0).rectangle(-120, -120, 240, 240).fill()
+            ctx.rgb(0.8, 0.8, 0.8)
             ctx.text_align = ctx.CENTER
             ctx.move_to(0, 0)
             ctx.font = ctx.get_font_name(0)
@@ -123,6 +151,7 @@ class CapTouchDemo(Application):
     def on_enter(self, vm: Optional[ViewManager]) -> None:
         super().on_enter(vm)
         self.button = None
+        self.full_redraw = True
 
 
 # For running with `mpremote run`:
