@@ -315,22 +315,6 @@ class Touchable:
     MOVED = TouchableState.MOVED
     ENDED = TouchableState.ENDED
 
-    class Entry:
-        """
-        A Touchable's log entry, containing some position measurement at some
-        timestamp.
-        """
-
-        __slots__ = ["ts", "phi", "rad"]
-
-        def __init__(self, ts: int, phi: float, rad: float) -> None:
-            self.ts = ts
-            self.phi = phi
-            self.rad = rad
-
-        def __repr__(self) -> str:
-            return f"{self.ts}: ({self.rad}, {self.phi})"
-
     class Gesture:
         """
         A simple captouch gesture, currently definined as a movement between two
@@ -340,65 +324,51 @@ class Touchable:
         the current state is the last measured position.
         """
 
-        def __init__(self, start: "Touchable.Entry", end: "Touchable.Entry") -> None:
-            self.start = start
-            self.end = end
+        def __init__(self, dis, vel):
+            self._dis = tuple([x * 35000 for x in dis])
+            self._vel = tuple([x * 35000 for x in vel])
 
         @property
         def distance(self) -> Tuple[float, float]:
             """
             Distance traveled by this gesture.
             """
-            delta_rad = self.end.rad - self.start.rad
-            delta_phi = self.end.phi - self.start.phi
-            return (delta_rad, delta_phi)
+            return self._dis
 
         @property
         def velocity(self) -> Tuple[float, float]:
             """
             Velocity vector of this gesture.
             """
-            delta_rad = self.end.rad - self.start.rad
-            delta_phi = self.end.phi - self.start.phi
-            if self.end.ts == self.start.ts:
-                return (0, 0)
-            delta_s = (self.end.ts - self.start.ts) / 1000
-            return (delta_rad / delta_s, delta_phi / delta_s)
+            return self._vel
 
     def __init__(self, pos: tuple[float, float] = (0.0, 0.0)) -> None:
-        # Entry log, used for filtering.
-        self._log: List[Touchable.Entry] = []
-
         # What the beginning of the gesture is defined as. This is ampled a few
         # entries into the log as the initial press stabilizes.
         self._start: Optional[Touchable.Entry] = None
-        self._start_ts: int = 0
 
         # Current and previous 'pressed' state from the petal, used to begin
         # gesture tracking.
         self._pressed = False
         self._prev_pressed = self._pressed
 
+        self._dis = None
+        self._vel = None
+        self._ref_start = None
+
         self._state = self.UP
 
-        # If not nil, amount of update() calls to wait until the gesture has
-        # been considered as started. This is part of the mechanism which
-        # eliminates early parts of a gesture while the pressure on the sensor
-        # grows and the user's touch contact point changes.
-        self._begin_wait: Optional[int] = None
-
-        self._last_ts: int = 0
-
-    def _append_entry(self, ts: int, petal: captouch.CaptouchPetalState) -> None:
+    def _get_data(self, petal, smooth=2, drop_first=0, drop_last=1):
         """
         Append an Entry to the log based on a given CaptouchPetalState.
         """
-        (rad, phi) = petal.position
-        entry = self.Entry(ts, phi, rad)
-        self._log.append(entry)
-        overflow = len(self._log) - 10
-        if overflow > 0:
-            self._log = self._log[overflow:]
+        rad = petal.get_rad(smooth=smooth, drop_first=drop_first, drop_last=drop_last)
+        phi = petal.get_phi(smooth=smooth, drop_first=drop_first, drop_last=drop_last)
+        if rad is None:
+            return None
+        if phi is None:
+            phi = 0
+        return (rad, phi)
 
     def _update(self, ts: int, petal: captouch.CaptouchPetalState) -> None:
         """
@@ -409,32 +379,43 @@ class Touchable:
         self._pressed = petal.pressed
 
         if not self._pressed:
-            if not self._prev_pressed or self._start is None:
+            if not self._prev_pressed:
                 self._state = self.UP
                 self._start = None
+                self._ref_start = None
+                self._dis = None
+                self._vel = None
             else:
                 self._state = self.ENDED
             return
 
-        self._append_entry(ts, petal)
-
-        if not self._prev_pressed:
-            # Wait 5 samples until we consider the gesture started.
-            # TODO(q3k): do better than hardcoding this. Maybe use pressure data?
-            self._begin_wait = 5
-        elif self._begin_wait is not None:
-            self._begin_wait -= 1
-            if self._begin_wait < 0:
-                self._begin_wait = None
-                # Okay, the gesture has officially started.
-                self._state = self.BEGIN
-                # Grab latest log entry as gesture start.
-                self._start = self._log[-1]
-                self._start_ts = ts
-                # Prune log.
-                self._log = self._log[-1:]
+        if self._start is None:
+            self._start = not None  # :3
+            self._state = self.BEGIN
         else:
             self._state = self.MOVED
+
+        if self._ref_start is None:
+            self._ref_start = self._get_data(petal, drop_first=1, drop_last=1)
+        else:
+            data = self._get_data(petal, drop_last=1)
+            if data is not None:
+                self._dis = [data[x] - self._ref_start[x] for x in range(2)]
+
+        if self._ref_start is None:
+            swipe_drop_last = 0
+            swipe_smooth = 0
+        else:
+            swipe_drop_last = 2
+            swipe_smooth = 2
+        data_now = self._get_data(petal, smooth=swipe_smooth, drop_last=swipe_drop_last)
+        data_prev = self._get_data(
+            petal, smooth=swipe_smooth, drop_last=swipe_drop_last + 1
+        )
+        if data_now is not None and data_prev is not None:
+            # hardcoded driver cycle time of 18ms for now. not pretty but
+            # accurate for now.
+            self._vel = [(data_now[x] - data_prev[x]) / 0.018 for x in range(2)]
 
     def phase(self) -> TouchableState:
         """
@@ -445,23 +426,14 @@ class Touchable:
     def current_gesture(self) -> Optional[Gesture]:
         if self._start is None:
             return None
-
-        assert self._start_ts is not None
-        delta_ms = self._last_ts - self._start_ts
-
-        first = self._start
-        last = self._log[-1]
-        # If this gesture hasn't ended, grab last 5 log entries for average of
-        # current position. This filters out a bunch of noise.
-        if self.phase() != self.ENDED:
-            log = self._log[-5:]
-            phis = [el.phi for el in log]
-            rads = [el.rad for el in log]
-            phi_avg = sum(phis) / len(phis)
-            rad_avg = sum(rads) / len(rads)
-            last = self.Entry(last.ts, phi_avg, rad_avg)
-
-        return self.Gesture(first, last)
+        params = [self._dis, self._vel]
+        for x, p in enumerate(params):
+            if p is None:
+                p = (0, 0)
+            else:
+                p = tuple(p)
+            params[x] = p
+        return self.Gesture(*params)
 
 
 class PetalState:

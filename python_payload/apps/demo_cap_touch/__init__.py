@@ -21,6 +21,7 @@ class Dot:
         self.status = 0
         self.pos = 0j
 
+
 class AutoParam:
     def __init__(self, app, max_value, auto_values):
         self.auto = True
@@ -52,6 +53,7 @@ class AutoParam:
         else:
             return f"{self.value}"
 
+
 class CapTouchDemo(Application):
     def __init__(self, app_ctx: ApplicationContext) -> None:
         super().__init__(app_ctx)
@@ -63,9 +65,9 @@ class CapTouchDemo(Application):
         self.full_redraw = True
         self.tinymenu_position = 0
         self.tinymenu_state = 0
-        self.smooth = AutoParam(self, 5, [1,2,2])
-        self.drop_first = AutoParam(self, 4, [0,0,1])
-        self.drop_last = AutoParam(self, 4, [0,2,2])
+        self.smooth = AutoParam(self, 5, [1, 2, 2])
+        self.drop_first = AutoParam(self, 4, [0, 0, 1])
+        self.drop_last = AutoParam(self, 4, [0, 2, 2])
         self.mode = 0
         self.shadow_index = 0
         self.shadow_list = [1, 0.35, 0.14, 0.06]
@@ -190,7 +192,7 @@ class CapTouchDemo(Application):
         ysize = 42
         ctx.rgb(0, 0, 0)
         ctx.rectangle(-xsize / 2, -ysize / 2, xsize, ysize).fill()
-        
+
         ctx.rgb(1.0, 0.0, 1.0)
         ctx.round_rectangle(-xsize / 2, -ysize / 2, xsize, ysize, 5).stroke()
         ctx.text_align = ctx.CENTER
@@ -219,7 +221,9 @@ class CapTouchDemo(Application):
             value = "go ->"
         if self.tinymenu_state == 1:
             ctx.rgb(0, 0.8, 0.8)
-            ctx.round_rectangle(-xsize/2, -ysize/2 + 1, xsize, ysize/2 - 2, 2).fill()
+            ctx.round_rectangle(
+                -xsize / 2, -ysize / 2 + 1, xsize, ysize / 2 - 2, 2
+            ).fill()
             ctx.move_to(0, 14)
             ctx.text(value)
             ctx.rgb(0, 0, 0)
@@ -227,7 +231,7 @@ class CapTouchDemo(Application):
             ctx.text(descr)
         else:
             ctx.rgb(0, 0.8, 0.8)
-            ctx.round_rectangle(-xsize/2, 1, xsize, ysize/2 - 2, 2).fill()
+            ctx.round_rectangle(-xsize / 2, 1, xsize, ysize / 2 - 2, 2).fill()
             ctx.move_to(0, -5)
             ctx.text(descr)
             ctx.rgb(0, 0, 0)

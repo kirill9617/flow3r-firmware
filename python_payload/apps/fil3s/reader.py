@@ -24,8 +24,7 @@ class Reader(ActionView):
     viewport_offset = (0.0, 0.0)
     zoom_enabled = False
 
-    scroll_x: CapScrollController
-    scroll_y: CapScrollController
+    scroll: CapScrollController
 
     def __init__(
         self,
@@ -35,8 +34,7 @@ class Reader(ActionView):
     ) -> None:
         super().__init__()
 
-        self.scroll_x = CapScrollController()
-        self.scroll_y = CapScrollController()
+        self.scroll = CapScrollController(dampening=0.95)
 
         self.path = path
         self.navigate = navigate
@@ -81,10 +79,10 @@ class Reader(ActionView):
 
         self.actions = [
             None,
-            Action(icon="\ue8d5", label="Scroll Y", enabled=controls),
+            Action(icon="\ue56b", label="Scroll", enabled=controls),
             Action(icon="\ue8b6", label="Zoom", enabled=controls),
             Action(icon="\ue5c4", label="Back"),
-            Action(icon="\ue8d4", label="Scroll X", enabled=controls),
+            Action(icon="\ue042", label="Reset", enabled=controls),
         ]
 
     def think(self, ins: InputState, delta_ms: int) -> None:
@@ -110,10 +108,16 @@ class Reader(ActionView):
 
         # TODO: Use "joystick-style" input for scrolling
         if not self.is_media:
-            self.scroll_x.update(self.input.captouch.petals[8].gesture, delta_ms)
-            self.scroll_y.update(self.input.captouch.petals[2].gesture, delta_ms)
-            x = self.scroll_x.position[0] * 0.2
-            y = self.scroll_y.position[0] * 0.2
+            self.scroll.update(self.input.captouch.petals[2].gesture, delta_ms)
+            xr = self.scroll.position[0]
+            yr = self.scroll.position[1]
+            x = -0.951 * xr - 0.309 * yr
+            y = -0.951 * yr + 0.309 * xr
+            # invert behavior here if you don't like it
+            x = -x
+            y = -y
+            if self.input.captouch.petals[8].whole.pressed:
+                self.scroll.reset()
             self.viewport_offset = (x - 80, y - 80)
 
     def draw(self, ctx: Context) -> None:
