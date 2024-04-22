@@ -21,6 +21,36 @@ class Dot:
         self.status = 0
         self.pos = 0j
 
+class AutoParam:
+    def __init__(self, app, max_value, auto_values):
+        self.auto = True
+        self._auto_values = auto_values
+        self._max_value = max_value
+        self._value = 0
+        self._app = app
+
+    @property
+    def value(self):
+        if self.auto:
+            return self._auto_values[self._app.mode]
+        else:
+            return self._value
+
+    def incr(self, amount):
+        if self.auto:
+            state = 0
+        else:
+            state = self._value + 1
+        state += amount
+        state %= self._max_value + 1
+        self._value = state - 1
+        self.auto = not state
+
+    def print(self):
+        if self.auto:
+            return f"auto ({self.value})"
+        else:
+            return f"{self.value}"
 
 class CapTouchDemo(Application):
     def __init__(self, app_ctx: ApplicationContext) -> None:
@@ -33,9 +63,9 @@ class CapTouchDemo(Application):
         self.full_redraw = True
         self.tinymenu_position = 0
         self.tinymenu_state = 0
-        self.smooth = 1
-        self.drop_first = 0
-        self.drop_last = 0
+        self.smooth = AutoParam(self, 5, [1,2,2])
+        self.drop_first = AutoParam(self, 4, [0,0,1])
+        self.drop_last = AutoParam(self, 4, [0,2,2])
         self.mode = 0
         self.shadow_index = 0
         self.shadow_list = [1, 0.35, 0.14, 0.06]
@@ -64,14 +94,11 @@ class CapTouchDemo(Application):
                                 self.mode += lr_dir
                                 self.mode %= 3
                             elif self.tinymenu_position == 1:
-                                self.smooth += lr_dir
-                                self.smooth %= 5
+                                self.smooth.incr(lr_dir)
                             elif self.tinymenu_position == 2:
-                                self.drop_first += lr_dir
-                                self.drop_first %= 4
+                                self.drop_first.incr(lr_dir)
                             elif self.tinymenu_position == 3:
-                                self.drop_last += lr_dir
-                                self.drop_last %= 4
+                                self.drop_last.incr(lr_dir)
                             elif self.tinymenu_position == 4:
                                 self.shadow_index += lr_dir
                                 self.shadow_index %= len(self.shadow_list)
@@ -83,14 +110,14 @@ class CapTouchDemo(Application):
                 top = not (i % 2)
                 petal = ins.captouch.petals[i]
                 rad = petal.get_rad(
-                    smooth=self.smooth,
-                    drop_first=self.drop_first,
-                    drop_last=self.drop_last,
+                    smooth=self.smooth.value,
+                    drop_first=self.drop_first.value,
+                    drop_last=self.drop_last.value,
                 )
                 phi = petal.get_phi(
-                    smooth=self.smooth,
-                    drop_first=self.drop_first,
-                    drop_last=self.drop_last,
+                    smooth=self.smooth.value,
+                    drop_first=self.drop_first.value,
+                    drop_last=self.drop_last.value,
                 )
                 if (not petal.pressed) or rad is None:
                     self.dots[i].status = int(petal.pressed)
@@ -160,27 +187,30 @@ class CapTouchDemo(Application):
         if not self.tinymenu_state:
             return
         xsize = 60
-        ysize = 40
+        ysize = 42
         ctx.rgb(0, 0, 0)
         ctx.rectangle(-xsize / 2, -ysize / 2, xsize, ysize).fill()
+        
         ctx.rgb(1.0, 0.0, 1.0)
         ctx.round_rectangle(-xsize / 2, -ysize / 2, xsize, ysize, 5).stroke()
         ctx.text_align = ctx.CENTER
-        ctx.font_size = 16
+        ctx.font_size = 15
         descr = "???"
         value = "???"
+        xsize -= 6
+        ysize -= 4
         if self.tinymenu_position == 0:
             descr = "mode"
             value = ["std", "hold", "drag"][self.mode]
         elif self.tinymenu_position == 1:
             descr = "smooth"
-            value = str(self.smooth)
+            value = self.smooth.print()
         elif self.tinymenu_position == 2:
-            descr = "drop:F"
-            value = str(self.drop_first)
+            descr = "drop_fr"
+            value = self.drop_first.print()
         elif self.tinymenu_position == 3:
-            descr = "drop:L"
-            value = str(self.drop_last)
+            descr = "drop_ls"
+            value = self.drop_last.print()
         elif self.tinymenu_position == 4:
             descr = "shadow"
             value = str(self.shadow_index)
@@ -189,16 +219,16 @@ class CapTouchDemo(Application):
             value = "go ->"
         if self.tinymenu_state == 1:
             ctx.rgb(0, 0.8, 0.8)
-            ctx.round_rectangle(-27, -17, 54, 16, 2).fill()
+            ctx.round_rectangle(-xsize/2, -ysize/2 + 1, xsize, ysize/2 - 2, 2).fill()
             ctx.move_to(0, 14)
             ctx.text(value)
             ctx.rgb(0, 0, 0)
-            ctx.move_to(0, -4)
+            ctx.move_to(0, -5)
             ctx.text(descr)
         else:
             ctx.rgb(0, 0.8, 0.8)
-            ctx.round_rectangle(-27, 1, 54, 16, 2).fill()
-            ctx.move_to(0, -4)
+            ctx.round_rectangle(-xsize/2, 1, xsize, ysize/2 - 2, 2).fill()
+            ctx.move_to(0, -5)
             ctx.text(descr)
             ctx.rgb(0, 0, 0)
             ctx.move_to(0, 14)
