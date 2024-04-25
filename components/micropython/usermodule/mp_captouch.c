@@ -35,6 +35,40 @@ typedef struct {
 
 const mp_obj_type_t captouch_state_type;
 
+STATIC mp_obj_t mp_captouch_petal_get_pos_raw(mp_obj_t self_in, bool get_rad) {
+    mp_captouch_petal_state_t *self = MP_OBJ_TO_PTR(self_in);
+    mp_captouch_state_t *captouch = MP_OBJ_TO_PTR(self->captouch);
+    flow3r_bsp_captouch_petal_data_t *state =
+        &captouch->underlying.petals[self->ix];
+    float ret[CAPTOUCH_POS_RING_LEN];
+    if (get_rad) {
+        flow3r_bsp_captouch_get_rad_raw(state, ret);
+    } else {
+        flow3r_bsp_captouch_get_phi_raw(state, ret);
+    }
+    mp_obj_t items[CAPTOUCH_POS_RING_LEN];
+    for (uint8_t i = 0; i < CAPTOUCH_POS_RING_LEN; i++) {
+        if (isnan(ret[i])) {
+            items[i] = mp_const_none;
+        } else {
+            items[i] = mp_obj_new_float(ret[i]);
+        }
+    }
+    return mp_obj_new_tuple(CAPTOUCH_POS_RING_LEN, items);
+}
+
+STATIC mp_obj_t mp_captouch_petal_get_rad_raw(mp_obj_t self_in) {
+    return mp_captouch_petal_get_pos_raw(self_in, true);
+}
+MP_DEFINE_CONST_FUN_OBJ_1(mp_captouch_petal_get_rad_raw_obj,
+                          mp_captouch_petal_get_rad_raw);
+
+STATIC mp_obj_t mp_captouch_petal_get_phi_raw(mp_obj_t self_in) {
+    return mp_captouch_petal_get_pos_raw(self_in, false);
+}
+MP_DEFINE_CONST_FUN_OBJ_1(mp_captouch_petal_get_phi_raw_obj,
+                          mp_captouch_petal_get_phi_raw);
+
 STATIC mp_obj_t mp_captouch_petal_get_pos(size_t n_args,
                                           const mp_obj_t *pos_args,
                                           mp_map_t *kw_args, bool get_rad) {
@@ -89,6 +123,10 @@ STATIC const mp_rom_map_elem_t mp_captouch_petal_locals_dict_table[] = {
       MP_ROM_PTR(&mp_captouch_petal_get_rad_obj) },
     { MP_ROM_QSTR(MP_QSTR_get_phi),
       MP_ROM_PTR(&mp_captouch_petal_get_phi_obj) },
+    { MP_ROM_QSTR(MP_QSTR_get_rad_raw),
+      MP_ROM_PTR(&mp_captouch_petal_get_rad_raw_obj) },
+    { MP_ROM_QSTR(MP_QSTR_get_phi_raw),
+      MP_ROM_PTR(&mp_captouch_petal_get_phi_raw_obj) },
 };
 
 STATIC MP_DEFINE_CONST_DICT(mp_captouch_petal_state_locals_dict,

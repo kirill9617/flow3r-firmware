@@ -860,7 +860,7 @@ static inline void petal_process(uint8_t index) {
     int32_t base = raw_petals[index][petal_pad_base];
     bool top = (index % 2) == 0;
     int32_t thres = top ? (TOP_PETAL_THRESHOLD) : (BOTTOM_PETAL_THRESHOLD);
-    bool pressed_prev = petal->pressed[petal->last_ring];
+    bool pressed_prev = petal->ring[petal->ring_index].pressed;
     thres = pressed_prev ? thres - (PETAL_HYSTERESIS) : thres;
     int32_t rad;
     int32_t phi;
@@ -896,20 +896,22 @@ static inline void petal_process(uint8_t index) {
         latches[index].press_event_new = pressed;
         latches[index].fresh = false;
     }
-    // value range fine tuning
+    // value range fine tuning: guaranteed range should be [-16384..16384]
     if (index == 2) {
-        rad = (rad * 19) >> 4;
-        phi = (phi * 19) >> 4;
+        rad = (rad * 19) >> 5;
+        phi = (phi * 19) >> 5;
     } else if (top) {
-        rad = (rad * 15) >> 4;
-        phi = (phi * 15) >> 4;
+        rad = (rad * 15) >> 5;
+        phi = (phi * 15) >> 5;
     } else {
-        rad = (rad * 42) >> 5;
+        rad = (rad * 42) >> 6;
     }
     rad = rad > 32767 ? 32767 : (rad < -32768 ? -32768 : rad);
     phi = phi > 32767 ? 32767 : (phi < -32768 ? -32768 : phi);
-    petal->last_ring = (petal->last_ring + 1) % (CAPTOUCH_POS_RING_LEN);
-    petal->pressed[petal->last_ring] = pressed;
-    petal->rad_ring[petal->last_ring] = rad;
-    petal->phi_ring[petal->last_ring] = phi;
+    petal->ring_index = (petal->ring_index + 1) % (CAPTOUCH_POS_RING_LEN);
+    petal->ring[petal->ring_index].pressed = pressed;
+    petal->ring[petal->ring_index].rad = rad;
+    petal->ring[petal->ring_index].phi = phi;
+    petal->ring[petal->ring_index].delta_t_qms = 18 * 4;
+    petal->capture_id++;
 }

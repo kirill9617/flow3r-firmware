@@ -387,6 +387,75 @@ class Touchable:
                 self._vel = None
             else:
                 self._state = self.ENDED
+                rad, phi = petal.get_rad_raw(), petal.get_phi_raw()
+                start = 0
+                while rad[start] is None:
+                    start += 1
+                num = 1
+                while ((start + num) < len(rad)) and (rad[start + num] is not None):
+                    num += 1
+                if num > 1:
+                    # if num > 2:
+                    #    start += 1
+                    #    num -= 1
+                    print("\nNEW ESCAPE!!")
+                    lines = [""] * 11
+                    head_line = "rad" + (num + 1) * " " + "phi"
+
+                    print_this = rad[start : start + num]
+                    min_print = min(print_this)
+                    max_print = max(print_this)
+                    print_range = 10 / (max_print - min_print)
+                    x = [int((p - min_print) * print_range) for p in print_this]
+                    for j in range(11):
+                        line = "|"
+                        for i in range(num):
+                            if x[i] == j:
+                                line += "X"
+                            else:
+                                line += "."
+                        line += "|  "
+                        lines[j] += line
+
+                    print_this = phi[start : start + num]
+                    min_print = min(print_this)
+                    max_print = max(print_this)
+                    print_range = 10 / (max_print - min_print)
+                    x = [int((p - min_print) * print_range) for p in print_this]
+
+                    for j in range(11):
+                        line = "|"
+                        for i in range(num):
+                            if x[i] == j:
+                                line += "X"
+                            else:
+                                line += "."
+                        line += "|  "
+                        lines[j] += line
+
+                    for j in range(11):
+                        print(lines[10 - j])
+
+                    if num > 4:
+                        num = 4
+                    rad = rad[start : start + num]
+                    phi = phi[start : start + num]
+                    # linear regression, least squares
+                    x = [-0.018 * x for x in range(num)]
+                    sum_x = sum(x)
+                    div = (num * sum([_x * _x for _x in x])) - sum_x * sum_x
+
+                    y = rad
+                    k = (num * sum([x[i] * y[i] for i in range(num)])) - sum_x * sum(y)
+                    rad_vel = k / div
+
+                    y = phi
+                    k = (num * sum([x[i] * y[i] for i in range(num)])) - sum_x * sum(y)
+                    phi_vel = k / div
+
+                    lin_reg = (rad_vel, phi_vel)
+                    print(f"linreg{num}: {lin_reg}")
+                    self._vel = lin_reg
             return
 
         if self._start is None:

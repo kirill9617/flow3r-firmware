@@ -75,16 +75,16 @@ static uint8_t num_filters = sizeof(filters) / sizeof(_ir_t);
 #define ring_decr(X, Y) \
     ((X + CAPTOUCH_POS_RING_LEN - Y) % CAPTOUCH_POS_RING_LEN)
 
-static float _get_pos(flow3r_bsp_captouch_petal_data_t *petal, uint8_t smooth,
-                      uint8_t drop_first, uint8_t drop_last, int16_t *ring) {
-    uint8_t start_ring = petal->last_ring;
+static float _get_pos(flow3r_bsp_captouch_petal_data_t *petal, bool get_rad,
+                      uint8_t smooth, uint8_t drop_first, uint8_t drop_last) {
+    uint8_t start_ring = petal->ring_index;
 
     // drop_last
     // to drop the last n samples we must delay the signal by n samples.
     // we then simply return NAN as soon as the first !pressed appears.
     drop_last %= 4;
     for (uint8_t i = 0; i < drop_last; i++) {
-        if (!petal->pressed[start_ring]) return NAN;
+        if (!petal->ring[start_ring].pressed) return NAN;
         start_ring = ring_decr(start_ring, 1);
     }
 
@@ -97,7 +97,7 @@ static float _get_pos(flow3r_bsp_captouch_petal_data_t *petal, uint8_t smooth,
     // at that time anymore we do it here in advance.
     drop_first %= 4;
     for (uint8_t i = 0, index = start_ring; i < drop_first; i++) {
-        if (!petal->pressed[index]) return NAN;
+        if (!petal->ring[index].pressed) return NAN;
         index = ring_decr(index, 1);
     }
 
@@ -106,7 +106,7 @@ static float _get_pos(flow3r_bsp_captouch_petal_data_t *petal, uint8_t smooth,
     // apply filter
     int32_t acc = 0;
     for (uint8_t i = 0, index = start_ring; i < filter->len; i++) {
-        if (!petal->pressed[ring_decr(index, drop_first)]) {
+        if (!petal->ring[ring_decr(index, drop_first)].pressed) {
             // the filter may "overflow" to newer data for quicker startup
             // in exchange for slightly higher initial noise.
             // we're still going through all addition steps to make sure
@@ -114,24 +114,55 @@ static float _get_pos(flow3r_bsp_captouch_petal_data_t *petal, uint8_t smooth,
             if (i < filter->min_len) return NAN;
             index = start_ring;
         }
-        acc += ring[index] * filter->coeff[i];
+        if (get_rad) {
+            acc += petal->ring[index].rad * filter->coeff[i];
+        } else {
+            acc += petal->ring[index].phi * filter->coeff[i];
+        }
         index = ring_decr(index, 1);
     }
 
     // formatting: convert to [-1..1] floats
     float ret = acc / 256;
-    ret = (ret * 2 + 1) / 65535;  // ocd, sorry
+    ret /= 16384.;
     return ret > 1.0 ? 1.0 : (ret < -1.0 ? -1.0 : ret);
 }
 
 float flow3r_bsp_captouch_get_rad(flow3r_bsp_captouch_petal_data_t *petal,
                                   uint8_t smooth, uint8_t drop_first,
                                   uint8_t drop_last) {
-    return _get_pos(petal, smooth, drop_first, drop_last, petal->rad_ring);
+    return _get_pos(petal, true, smooth, drop_first, drop_last);
 }
 float flow3r_bsp_captouch_get_phi(flow3r_bsp_captouch_petal_data_t *petal,
                                   uint8_t smooth, uint8_t drop_first,
                                   uint8_t drop_last) {
     if (petal->index % 2) return NAN;
-    return _get_pos(petal, smooth, drop_first, drop_last, petal->phi_ring);
+    return _get_pos(petal, false, smooth, drop_first, drop_last);
+}
+
+void _get_pos_raw(flow3r_bsp_captouch_petal_data_t *petal, bool get_rad,
+                  float *ret) {
+    for (uint8_t i = 0, index = petal->ring_index; i < CAPTOUCH_POS_RING_LEN;
+         i++) {
+        if (petal->ring[index].pressed) {
+            if (get_rad) {
+                ret[i] = petal->ring[index].rad / 16384.;
+            } else {
+                ret[i] = petal->ring[index].phi / 16384.;
+            }
+        } else {
+            ret[i] = NAN;
+        }
+        index = ring_decr(index, 1);
+    }
+}
+
+void flow3r_bsp_captouch_get_rad_raw(flow3r_bsp_captouch_petal_data_t *petal,
+                                     float *ret) {
+    _get_pos_raw(petal, true, ret);
+}
+
+void flow3r_bsp_captouch_get_phi_raw(flow3r_bsp_captouch_petal_data_t *petal,
+                                     float *ret) {
+    _get_pos_raw(petal, false, ret);
 }
