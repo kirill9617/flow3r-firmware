@@ -256,6 +256,23 @@ STATIC mp_obj_t mp_channel_bud_get_num_signals(mp_obj_t chan, mp_obj_t bud) {
 STATIC MP_DEFINE_CONST_FUN_OBJ_2(mp_channel_bud_get_num_signals_obj,
                                  mp_channel_bud_get_num_signals);
 
+STATIC mp_obj_t mp_channel_bud_get_always_render(mp_obj_t chan, mp_obj_t bud) {
+    bool ret = bl00mbox_channel_bud_get_always_render(mp_obj_get_int(chan),
+                                                      mp_obj_get_int(bud));
+    return mp_obj_new_bool(ret);
+}
+STATIC MP_DEFINE_CONST_FUN_OBJ_2(mp_channel_bud_get_always_render_obj,
+                                 mp_channel_bud_get_always_render);
+
+STATIC mp_obj_t mp_channel_bud_set_always_render(mp_obj_t chan, mp_obj_t bud,
+                                                 mp_obj_t value) {
+    bl00mbox_channel_bud_set_always_render(
+        mp_obj_get_int(chan), mp_obj_get_int(bud), mp_obj_is_true(value));
+    return mp_const_none;
+}
+STATIC MP_DEFINE_CONST_FUN_OBJ_3(mp_channel_bud_set_always_render_obj,
+                                 mp_channel_bud_set_always_render);
+
 // ========================
 //      SIGNAL OPERATIONS
 // ========================
@@ -551,6 +568,10 @@ STATIC const mp_map_elem_t bl00mbox_globals_table[] = {
       MP_ROM_PTR(&mp_channel_bud_get_init_var_obj) },
     { MP_ROM_QSTR(MP_QSTR_channel_bud_get_num_signals),
       MP_ROM_PTR(&mp_channel_bud_get_num_signals_obj) },
+    { MP_ROM_QSTR(MP_QSTR_channel_bud_get_always_render),
+      MP_ROM_PTR(&mp_channel_bud_get_always_render_obj) },
+    { MP_ROM_QSTR(MP_QSTR_channel_bud_set_always_render),
+      MP_ROM_PTR(&mp_channel_bud_set_always_render_obj) },
 
     // SIGNAL OPERATIONS
     { MP_ROM_QSTR(MP_QSTR_channel_bud_get_signal_name),

@@ -123,7 +123,7 @@ void poly_squeeze_run(radspa_t * poly_squeeze, uint16_t num_samples, uint32_t re
 
     for(uint8_t j = 0; j < data->num_inputs; j++){
         uint16_t pitch_index;
-        int16_t trigger_in = radspa_trigger_get_const(&poly_squeeze->signals[TRIGGER_INPUT * NUM_MPX*j],
+        int16_t trigger_in = radspa_trigger_get_const(&poly_squeeze->signals[TRIGGER_INPUT + NUM_MPX*j],
                                 &inputs[j].trigger_in_hist, &pitch_index, num_samples, render_pass_id);
         notes[j].pitch = radspa_signal_get_value(&poly_squeeze->signals[PITCH_INPUT + NUM_MPX*j], pitch_index, render_pass_id);
         // should order events by pitch index some day maybe

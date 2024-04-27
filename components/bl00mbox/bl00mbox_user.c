@@ -280,6 +280,7 @@ bl00mbox_bud_t * bl00mbox_channel_new_bud(uint8_t channel, uint32_t id, uint32_t
     bud->is_being_rendered = false;
     //TODO: look for empty indices? maybe?
     bud->index = bl00mbox_bud_index;
+    bud->always_render = false;
     bl00mbox_bud_index++;
     bud->chan_next = NULL;
 
@@ -306,6 +307,9 @@ bool bl00mbox_channel_delete_bud(uint8_t channel, uint32_t bud_index){
     for(uint16_t i = 0; i < num_signals; i++){
         bl00mbox_channel_disconnect_signal(channel, bud_index, i);
     }
+
+    // pop from always list
+    bl00mbox_channel_bud_set_always_render(channel, bud_index, false);
 
     // pop from channel bud list
     bl00mbox_bud_t * seek = chan->buds;
@@ -697,6 +701,61 @@ char * bl00mbox_channel_bud_get_signal_unit(uint8_t channel, uint32_t bud_index,
     radspa_signal_t * sig = bl00mbox_signal_get_by_index(bud->plugin, bud_signal_index);
     if(sig == NULL) return false;
     return sig->unit;
+}
+
+bool bl00mbox_channel_bud_get_always_render(uint8_t channel, uint32_t bud_index){
+    bl00mbox_channel_t * chan = bl00mbox_get_channel(channel);
+    if(chan == NULL) return false;
+    bl00mbox_bud_t * bud = bl00mbox_channel_get_bud_by_index(channel, bud_index);
+    if(bud == NULL) return false;
+    return bud->always_render;
+}
+
+bool bl00mbox_channel_bud_set_always_render(uint8_t channel, uint32_t bud_index, bool value){
+    bl00mbox_channel_t * chan = bl00mbox_get_channel(channel);
+    if(chan == NULL) return false;
+    bl00mbox_bud_t * bud = bl00mbox_channel_get_bud_by_index(channel, bud_index);
+    if(bud == NULL) return false;
+    if(bud->always_render == value) return false;
+
+    if(value){
+        bl00mbox_bud_list_t * new = malloc(sizeof(bl00mbox_bud_list_t));
+        new->bud = bud;
+        new->next = NULL;
+        if(chan->always_render == NULL){
+            bl00mbox_audio_waitfor_pointer_change(&(chan->always_render), new);
+        } else{
+            bl00mbox_bud_list_t * end = chan->always_render;
+            while(end->next != NULL){
+                end = end->next;
+            }
+            bl00mbox_audio_waitfor_pointer_change(&(end->next), new);
+        }
+    } else {
+        if(chan->always_render != NULL){
+            bl00mbox_bud_list_t * seek = chan->always_render;
+            bl00mbox_bud_list_t * prev = NULL;
+            while(seek != NULL){
+                if(seek->bud->index == bud_index){
+                    break;
+                }
+                prev = seek;
+                seek = seek->next;
+            }
+            if(seek != NULL){
+                if(prev != NULL){
+                    bl00mbox_audio_waitfor_pointer_change(&(prev->next), seek->next);
+                } else {
+                    bl00mbox_audio_waitfor_pointer_change(&(chan->always_render), seek->next);
+                }
+                free(seek);
+            }
+        }
+    }
+
+    bud->always_render = value;
+    bl00mbox_channel_event(channel);
+    return true;
 }
 
 bool bl00mbox_channel_bud_set_signal_value(uint8_t channel, uint32_t bud_index, uint32_t bud_signal_index, int16_t value){

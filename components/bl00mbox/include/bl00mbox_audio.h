@@ -30,8 +30,14 @@ typedef struct _bl00mbox_bud_t{
     uint32_t init_var; // init var that was used for plugin creation
     uint8_t channel; // index of channel that owns the plugin
     volatile bool is_being_rendered; // true if rendering the plugin is in progress, else false.
+    bool always_render;
     struct _bl00mbox_bud_t * chan_next; //for linked list in bl00mbox_channel_t
 } bl00mbox_bud_t;
+
+typedef struct _bl00mbox_bud_list_t{
+    struct _bl00mbox_bud_t * bud;
+    struct _bl00mbox_bud_list_t * next;
+} bl00mbox_bud_list_t;
 
 typedef struct _bl00mbox_connection_subscriber_t{
     uint8_t type; // 0: standard signal input, 1: output mixer
@@ -64,6 +70,7 @@ typedef struct{
     struct _bl00mbox_channel_root_t * root_list; // list of all roots associated with channels
     uint32_t render_pass_id; // may be used by host to determine whether recomputation is necessary
     struct _bl00mbox_bud_t * buds; // linked list with all channel buds
+    struct _bl00mbox_bud_list_t * always_render; // linked list of buds that should always render
     struct _bl00mbox_connection_t * connections; // linked list with all channel connections
 } bl00mbox_channel_t;
 

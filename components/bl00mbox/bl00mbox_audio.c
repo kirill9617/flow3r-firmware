@@ -134,6 +134,7 @@ void bl00mbox_channels_init(){
         chan->connections = NULL;
         chan->is_active = true;
         chan->is_free = true;
+        chan->always_render = NULL;
         chan->name = NULL;
         chan->dc = 0;
     }
@@ -178,6 +179,12 @@ void bl00mbox_audio_bud_render(bl00mbox_bud_t * bud){
 static bool bl00mbox_audio_channel_render(bl00mbox_channel_t * chan, int16_t * out, bool adding){
     if(render_pass_id == chan->render_pass_id) return false;
     chan->render_pass_id = render_pass_id;
+
+    bl00mbox_bud_list_t * always = chan->always_render;
+    while(always != NULL){
+        bl00mbox_audio_bud_render(always->bud);
+        always = always ->next;
+    }
 
     bl00mbox_channel_root_t * root = chan->root_list;
 

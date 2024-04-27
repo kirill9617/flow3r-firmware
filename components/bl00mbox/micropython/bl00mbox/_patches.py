@@ -17,6 +17,16 @@ class _Patch:
         ret += "\n  [plugins:]    " + "\n    ".join(repr(self.plugins).split("\n"))
         return ret
 
+    def delete(self):
+        for plugin_name in self.plugins.__dict__:
+            if not plugin_name.startswith("_"):
+                plugin = self.plugins.__dict__[plugin_name]
+                if type(plugin) == list:
+                    for p in plugin:
+                        p.delete()
+                else:
+                    plugin.delete()
+
 
 class _PatchItemList:
     def __init__(self):
