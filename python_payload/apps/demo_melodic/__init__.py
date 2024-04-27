@@ -20,15 +20,10 @@ class MelodicApp(Application):
 
         self.base_scale = [0, 2, 3, 5, 7, 8, 10]
         self.mid_point_petal = 0
-        self.mid_point_lock = True
-        self.mid_point_petal_hyst = 3
 
         self.min_note = -45
         self.max_note = +15
         self.mid_point = -15
-
-        self.at_min_note = False
-        self.at_max_note = False
 
         self.auto_color = (1, 0.5, 1)
         self.min_hue = 0
@@ -37,7 +32,7 @@ class MelodicApp(Application):
         self.petal_index = [7, 9, 1, 3]
         self.petal_block = [True for x in range(10)]
 
-        self.scale = [0] * 10
+        self._scale = [0] * 10
         self.blm = None
 
         self.drone_toggle = ToggleParameter("drone")
@@ -47,10 +42,29 @@ class MelodicApp(Application):
 
         self.enter_done = False
 
+        self._fg_page = None
+        # put these in their own class someday
         self._scale_setup_highlight = 0
         self._scale_setup_root = 0
         self._scale_setup_root_mode = False
-        self._fg_page = None
+        self._shift_steps = 4
+        self._scale_steps = 1
+
+    @property
+    def scale(self):
+        return self._scale
+
+    @scale.setter
+    def scale(self, vals):
+        new_vals = []
+        for val in vals:
+            # last resort limiters, these should never trigger
+            while val > self.max_note:
+                val -= 12
+            while val < self.min_note:
+                val += 12
+            new_vals += [val]
+        self._scale = new_vals
 
     @property
     def fg_page(self):
@@ -85,11 +99,45 @@ class MelodicApp(Application):
         o = val // 12
         return i + len(self.base_scale) * o
 
-    def make_scale(self):
+    def _make_scale(self):
+        new_scale = [None] * 10
         i = self.base_scale_get_mod_index_from_val(self.mid_point)
         for j in range(-5, 5):
-            tone = self.base_scale_get_val_from_mod_index(i + j)
-            self.scale[(self.mid_point_petal + j) % 10] = tone
+            tone = self.base_scale_get_val_from_mod_index(i + j * self._scale_steps)
+            new_scale[(self.mid_point_petal + j) % 10] = tone
+        return new_scale
+        
+    def make_scale(self):
+        self.scale = self._make_scale()
+
+    def _shift_playing_field_by_num_steps(self, num):
+        i = self.base_scale_get_mod_index_from_val(self.mid_point)
+        self.mid_point = self.base_scale_get_val_from_mod_index(i + num)
+        if self._scale_steps < 0:
+            num = -num
+        self.mid_point_petal += num
+        self.mid_point_petal = self.mid_point_petal % 10
+        return self._make_scale()
+
+    def shift_playing_field_by_num_steps(self, num):
+        new_scale = self._shift_playing_field_by_num_steps(num)
+        while min(new_scale) < self.min_note:
+            new_scale = self._shift_playing_field_by_num_steps(1)
+        while max(new_scale) > self.max_note:
+            new_scale = self._shift_playing_field_by_num_steps(-1)
+        self.scale = new_scale
+
+    def _shift_playing_field_by_oct(self, num):
+        self.mid_point += num * 12
+        return self._make_scale()
+
+    def shift_playing_field_by_oct(self, num):
+        new_scale = self._shift_playing_field_by_oct(num)
+        while min(new_scale) < self.min_note:
+            new_scale = self._shift_playing_field_by_oct(1)
+        while max(new_scale) > self.max_note:
+            new_scale = self._shift_playing_field_by_oct(-1)
+        self.scale = new_scale
 
     def draw(self, ctx):
         if not self.enter_done or self.blm is None:
@@ -371,6 +419,7 @@ class MelodicApp(Application):
             page.finalize(self.blm, self.modulators)
 
         self.scale_page = ScaleSetupPage("scale")
+        self.steps_page = StepsPage("steps")
 
         self.notes_page = SubMenuPage("notes")
         self.sound_page = SubMenuPage("sounds")
@@ -401,7 +450,8 @@ class MelodicApp(Application):
             self.scale_page,
             DummyPage("arp"),
             DummyPage("bend"),
-            DummyPage("detune"),
+            DummyPage("steps"),
+            #self.steps_page,
         ]
         self.notes_page.savepage = NotesSavePage("notes", 5)
         self.config_page.menupages = [
@@ -450,51 +500,6 @@ class MelodicApp(Application):
         self.save_sound_settings("autosave.json")
         self.save_notes_settings("autosave.json")
         self.destroy_synth()
-
-    def shift_playing_field_by_num_petals(self, num):
-        num_positive = True
-        if num < 0:
-            num_positive = False
-            self.at_max_note = False
-        elif num > 0:
-            self.at_min_note = False
-        num = abs(num)
-        while num != 0:
-            if num > 3:
-                num_part = 3
-                num -= 3
-            else:
-                num_part = num
-                num = 0
-            if num_positive:
-                self.mid_point_petal += num_part
-                self.mid_point_petal = self.mid_point_petal % 10
-            else:
-                self.mid_point_petal -= num_part
-                self.mid_point_petal = self.mid_point_petal % 10
-            self.mid_point = self.scale[self.mid_point_petal]
-            self.make_scale()
-
-        # make sure things stay in bounds
-        while max(self.scale) > self.max_note:
-            self.mid_point_petal -= 1
-            self.mid_point_petal = self.mid_point_petal % 10
-            self.mid_point = self.scale[self.mid_point_petal]
-            self.make_scale()
-            self.at_max_note = True
-        while min(self.scale) < self.min_note:
-            self.mid_point_petal += 1
-            self.mid_point_petal = self.mid_point_petal % 10
-            self.mid_point = self.scale[self.mid_point_petal]
-            self.make_scale()
-            self.at_min_note = True
-
-        self.make_scale()
-
-        if max(self.scale) == self.max_note:
-            self.at_max_note = True
-        if min(self.scale) == self.min_note:
-            self.at_min_note = True
 
     def think(self, ins, delta_ms):
         super().think(ins, delta_ms)

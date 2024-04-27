@@ -137,12 +137,13 @@ class PlayingPage(Page):
         super().__init__(name)
         self.use_bottom_petals = False
 
-    def right_press_event(self, app):
-        app.shift_playing_field_by_num_petals(4)
-        self.full_redraw = True
-
-    def left_press_event(self, app):
-        app.shift_playing_field_by_num_petals(-4)
+    def lr_press_event(self, app, lr):
+        if app._scale_steps < 0:
+            lr = -lr
+        if app._shift_steps:
+            app.shift_playing_field_by_num_steps(app._shift_steps * lr)
+        else:
+            app.shift_playing_field_by_oct(lr)
         self.full_redraw = True
 
     def draw(self, ctx, app):
@@ -906,8 +907,82 @@ class NotesSavePage(SavePage):
             else:
                 self._slot_content[i] = list(settings["base scale"])
 
+class StepsPage(LonerPage):
+    def think(self, ins, delta_ms, app):
+        petals = app.input.captouch.petals
 
-class ScaleSetupPage(Page):
+        steps = app._shift_steps
+        delta = petals[1].whole.pressed - petals[9].whole.pressed
+        if delta:
+            steps += delta
+            if not steps:
+                steps += delta
+            steps = min(max(steps, 0), 10)
+            app._shift_steps = steps
+
+        steps = app._scale_steps
+        delta = petals[3].whole.pressed - petals[7].whole.pressed
+        if delta:
+            steps += delta
+            if not steps:
+                steps += delta
+            steps = min(max(steps, -5), 5)
+            app._scale_steps = steps
+            app.make_scale()
+
+    def draw(self, ctx, app):
+        ctx.rgb(*app.cols.bg).rectangle(-120, -120, 240, 240).fill()
+        app.draw_title(ctx, self.display_name)
+        ctx.rgb(*app.cols.fg)
+        ctx.text_align = ctx.RIGHT
+        ctx.font_size = 16
+        ctx.font = "Arimo Bold"
+        ctx.move_to(30,-60)
+        ctx.text("shift skip:")
+        ctx.move_to(30,-40)
+        ctx.text("scale skip:")
+        ctx.text_align = ctx.LEFT
+        ctx.move_to(40,-60)
+        if app._shift_steps:
+            ctx.text(str(app._shift_steps))
+        else:
+            ctx.text("oct")
+        ctx.move_to(40,-40)
+        ctx.text(str(app._scale_steps))
+
+        ctx.text_align = ctx.CENTER
+
+        pos = [x * 0.87 + 85 for x in app.scale]
+        start = [math.tau * (0.75 - 0.04 + i / 10) for i in range(10)]
+        stop = [math.tau * (0.75 + 0.04 + i / 10) for i in range(10)]
+
+        #compress
+        avg_pos = sum(pos)/10
+        pos = [(p-20)*60/avg_pos for p in pos]
+
+        # tinywheel
+
+        ctx.rgb(*app.cols.fg)
+
+        ctx.save()
+        ctx.translate(0,40)
+        ctx.line_width = 20
+        for i in range(10):
+            ctx.arc(0, 0, pos[i], start[i], stop[i], 0).stroke()
+        ctx.rotate(-math.tau / 4)
+        ctx.text_align = ctx.CENTER
+        ctx.font = "Arimo Bold"
+        ctx.font_size = 16
+        ctx.rgb(*app.cols.bg)
+        for i in range(10):
+            ctx.rgb(*app.cols.bg)
+            ctx.move_to(pos[i], 6)
+            note = bl00mbox.helpers.sct_to_note_name(app.scale[i] * 200 + 18367)
+            ctx.text(note[:-1])
+            ctx.rotate(math.tau / 10)
+        ctx.restore()
+
+class ScaleSetupPage(LonerPage):
     def think(self, ins, delta_ms, app):
         root_shift = 0
         if app.input.captouch.petals[7].whole.pressed:
@@ -981,6 +1056,8 @@ class ScaleSetupPage(Page):
             ctx.stroke()
 
         ctx.text_align = ctx.LEFT
+        ctx.font_size = 16
+        ctx.font = "Arimo Bold"
         radius = 500
         ctx.translate(0, radius - 25)
         ctx.rotate(0.25 * math.tau)
@@ -989,8 +1066,6 @@ class ScaleSetupPage(Page):
         if app._scale_setup_root_mode:
             oversize = 1
         ctx.rotate((-4.5 - oversize) * step)
-        ctx.font_size = 16
-        ctx.font = "Arimo Bold"
         for tone in range(12):
             tone = (tone + app._scale_setup_root) % 12
             note = bl00mbox.helpers.sct_to_note_name(tone * 200 + 18367)
