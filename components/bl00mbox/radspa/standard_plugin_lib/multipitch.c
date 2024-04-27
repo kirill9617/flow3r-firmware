@@ -36,7 +36,7 @@ static inline int32_t pitch_limit(int32_t pitch, int32_t min, int32_t max){
     } else if(pitch < min){
         int32_t estimate = (13891*(min - pitch))>>25;
         pitch += 2400 * estimate;
-        while(pitch < max) pitch += 2400;
+        while(pitch < min) pitch += 2400;
     }
     return pitch;
 }
