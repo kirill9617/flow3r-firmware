@@ -22,3 +22,9 @@ __pycache__
 docs/_build/
 
 /tools/mypy.sh
+
+# direnv
+.direnv
+
+# nix
+result*
