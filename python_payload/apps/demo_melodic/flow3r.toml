@@ -1,6 +1,6 @@
 [app]
-name = "melodic demo"
-category = "Hidden"
+name = "mono synth"
+category = "Music"
 
 [entry]
 class = "MelodicApp"
