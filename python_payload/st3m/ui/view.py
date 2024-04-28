@@ -15,6 +15,9 @@ class View(Responder):
     BaseView class.
     """
 
+    override_os_button_back = False
+    override_os_button_volume = False
+
     def on_enter(self, vm: Optional["ViewManager"]) -> None:
         """
         Called when the View has just become active.
@@ -208,8 +211,8 @@ class ViewManager(Responder):
 
         self._transitioning = False
         self._transition = 0.0
+        # note: not actually a history but the current stack.
         self._history: List[View] = []
-        self._input = InputController()
 
         self._first_think = False
         self._fully_drawn = False
@@ -247,9 +250,33 @@ class ViewManager(Responder):
         if self._outgoing is None:
             self._end_transition()
 
-    def think(self, ins: InputState, delta_ms: int) -> None:
-        self._input.think(ins, delta_ms)
+    @property
+    def override_os_button_volume(self):
+        if self._incoming is None:
+            return False
+        return self._incoming.override_os_button_volume
 
+    @property
+    def override_os_button_back(self):
+        if self._incoming is None:
+            return False
+        return self._incoming.override_os_button_back
+
+    def exit_view(self):
+        if not self._history and self._debug:
+            utime.sleep(0.5)
+            machine.reset()
+        else:
+            ret = len(self._history) > 0
+            self.pop(ViewTransitionSwipeRight())
+            return ret
+
+    def _ignore_pressed(self):
+        if self._incoming is not None:
+            if getattr(self._incoming, "input", None) is not None:
+                self._incoming.input._ignore_pressed()
+
+    def think(self, ins: InputState, delta_ms: int) -> None:
         if self._transitioning:
             if not self._first_think:
                 self._transition += (delta_ms / 1000.0) * (1000 / self._time_ms)
@@ -260,13 +287,6 @@ class ViewManager(Responder):
                 self._transition = 1.0
                 if self._fully_drawn:
                     self._end_transition()
-
-        if self._input.buttons.os.middle.released:
-            if not self._history and self._debug:
-                utime.sleep(0.5)
-                machine.reset()
-            else:
-                self.pop(ViewTransitionSwipeRight())
 
         if self._outgoing is not None and self._outgoing_wants_to_think:
             self._outgoing.think(ins, delta_ms)
