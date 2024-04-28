@@ -380,38 +380,37 @@ class OverlayVolume(Overlay):
         self._muted = False
 
         self._started = False
-        self._prev_volume = self._volume
-        self._prev_headphones = self._headphones
-        self._prev_muted = self._muted
-
-    def changed(self) -> bool:
-        """
-        Returns true if there was a system volume change warranting re-drawing
-        the overlay.
-        """
-        if self._prev_volume != self._volume:
-            return True
-        if self._prev_headphones != self._headphones:
-            return True
-        if self._prev_muted != self._muted:
-            return True
-        return False
+        self._but_prev = 0
+        self._but_ms = 0
 
     def think(self, ins: InputState, delta_ms: int) -> None:
         self._volume = audio.get_volume_relative()
         self._headphones = audio.headphones_are_connected()
         self._muted = (self._volume == 0) or audio.get_mute()
-
-        if self._started:
-            if self.changed():
-                self._showing = 1000
-        else:
-            # Ignore first run cycle, to not show volume slider on startup.
+        # Ignore first run cycle, to not show volume slider on startup.
+        if not self._started:
             self._started = True
+            return
 
-        self._prev_volume = self._volume
-        self._prev_headphones = self._headphones
-        self._prev_muted = self._muted
+        but = ins.buttons.os
+        if but in [-1, 1]:
+            if but != self._but_prev:
+                audio.adjust_volume_dB(settings.num_volume_step_db.value * but)
+                self._showing = 1000
+                self._but_ms = 0
+            else:
+                self._but_ms += delta_ms
+                if self._but_ms > settings.num_volume_repeat_wait_ms.value:
+                    audio.adjust_volume_dB(
+                        settings.num_volume_repeat_step_db.value * but
+                    )
+                    self._showing = 1000
+
+                    self._but_ms -= settings.num_volume_repeat_ms.value
+        self._but_prev = but
+
+        self.repeat_wait_ms = settings.num_volume_repeat_wait_ms.value
+        self.repeat_ms = settings.num_volume_repeat_ms.value
 
         if self._showing is None:
             return

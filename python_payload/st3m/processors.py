@@ -25,6 +25,7 @@ class AudioProcessor(Processor):
     """
     The AudioProcessor is respondible for managing system-wide audio state, like
     volume control using buttons.
+
     """
 
     def __init__(self) -> None:
@@ -75,7 +76,7 @@ class ProcessorMidldeware(Responder):
     """
 
     PROCESSORS: List[Processor] = [
-        AudioProcessor(),
+        # AudioProcessor(),
     ]
 
     def __init__(self, top: Responder) -> None:
