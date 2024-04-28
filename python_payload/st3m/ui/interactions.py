@@ -192,7 +192,7 @@ class CapScrollController:
     TODO(q3k): notching into predefined positions, for use in menus
     """
 
-    def __init__(self) -> None:
+    def __init__(self, dampening=0.99) -> None:
         self.position = (0.0, 0.0)
         self.momentum = (0.0, 0.0)
         # Current timestamp.
@@ -200,6 +200,11 @@ class CapScrollController:
         # Position when touch started, and time at which touch started.
         self._grab_start: Optional[Tuple[float, float]] = None
         self._grab_start_ms: Optional[int] = None
+        self._damp = dampening
+
+    def reset(self):
+        self.position = (0.0, 0.0)
+        self.momentum = (0.0, 0.0)
 
     def update(self, t: Touchable, delta_ms: int) -> None:
         """
@@ -235,7 +240,7 @@ class CapScrollController:
             rad_m, phi_m = self.momentum
             rad_p += rad_m / (1000 / delta_ms)
             phi_p += phi_m / (1000 / delta_ms)
-            rad_m *= 0.99
-            phi_m *= 0.99
+            rad_m *= self._damp
+            phi_m *= self._damp
             self.momentum = (rad_m, phi_m)
             self.position = (rad_p, phi_p)

@@ -1,4 +1,5 @@
 #include "flow3r_bsp_captouch.h"
+#include <math.h>
 #include "esp_err.h"
 #include "esp_log.h"
 
@@ -34,3 +35,134 @@ void flow3r_bsp_captouch_init() {
     }
 }
 #endif
+
+typedef struct {
+    uint8_t len;
+    uint8_t min_len;
+    int32_t coeff[CAPTOUCH_POS_FILT_LEN];
+} _ir_t;
+
+static _ir_t filters[] = {
+    {
+        .len = 1,
+        .min_len = 1,
+        .coeff = { 256 },
+    },
+    {
+        .len = 4,
+        .min_len = 2,
+        .coeff = { 135, 69, 35, 17 },
+    },
+    {
+        .len = 5,
+        .min_len = 2,
+        .coeff = { 90, 89, 44, 22, 11 },
+    },
+    {
+        .len = 6,
+        .min_len = 3,
+        .coeff = { 69, 57, 46, 36, 28, 20 },
+    },
+    {
+        .len = 8,
+        .min_len = 4,
+        .coeff = { 32, 32, 32, 32, 32, 32, 32, 32 },
+    },
+};
+
+static uint8_t num_filters = sizeof(filters) / sizeof(_ir_t);
+
+#define ring_decr(X, Y) \
+    ((X + CAPTOUCH_POS_RING_LEN - Y) % CAPTOUCH_POS_RING_LEN)
+
+static float _get_pos(flow3r_bsp_captouch_petal_data_t *petal, bool get_rad,
+                      uint8_t smooth, uint8_t drop_first, uint8_t drop_last) {
+    uint8_t start_ring = petal->ring_index;
+
+    // drop_last
+    // to drop the last n samples we must delay the signal by n samples.
+    // we then simply return NAN as soon as the first !pressed appears.
+    drop_last %= 4;
+    for (uint8_t i = 0; i < drop_last; i++) {
+        if (!petal->ring[start_ring].pressed) return NAN;
+        start_ring = ring_decr(start_ring, 1);
+    }
+
+    // drop_first
+    // we apply a tiny hack later in the filter:
+    // normally, the filter would check if a sample that it's about to process
+    // is (i.e. pressed). for convenience we hijack this and make it look ahead
+    // by drop_first ringbuffer steps.
+    // since this means we're not checking the first drop_first ringbuffer steps
+    // at that time anymore we do it here in advance.
+    drop_first %= 4;
+    for (uint8_t i = 0, index = start_ring; i < drop_first; i++) {
+        if (!petal->ring[index].pressed) return NAN;
+        index = ring_decr(index, 1);
+    }
+
+    smooth = smooth > (num_filters - 1) ? (num_filters - 1) : smooth;
+    _ir_t *filter = &(filters[smooth]);
+    // apply filter
+    int32_t acc = 0;
+    for (uint8_t i = 0, index = start_ring; i < filter->len; i++) {
+        if (!petal->ring[ring_decr(index, drop_first)].pressed) {
+            // the filter may "overflow" to newer data for quicker startup
+            // in exchange for slightly higher initial noise.
+            // we're still going through all addition steps to make sure
+            // it's unity gain.
+            if (i < filter->min_len) return NAN;
+            index = start_ring;
+        }
+        if (get_rad) {
+            acc += petal->ring[index].rad * filter->coeff[i];
+        } else {
+            acc += petal->ring[index].phi * filter->coeff[i];
+        }
+        index = ring_decr(index, 1);
+    }
+
+    // formatting: convert to [-1..1] floats
+    float ret = acc / 256;
+    ret /= 16384.;
+    return ret > 1.0 ? 1.0 : (ret < -1.0 ? -1.0 : ret);
+}
+
+float flow3r_bsp_captouch_get_rad(flow3r_bsp_captouch_petal_data_t *petal,
+                                  uint8_t smooth, uint8_t drop_first,
+                                  uint8_t drop_last) {
+    return _get_pos(petal, true, smooth, drop_first, drop_last);
+}
+float flow3r_bsp_captouch_get_phi(flow3r_bsp_captouch_petal_data_t *petal,
+                                  uint8_t smooth, uint8_t drop_first,
+                                  uint8_t drop_last) {
+    if (petal->index % 2) return NAN;
+    return _get_pos(petal, false, smooth, drop_first, drop_last);
+}
+
+void _get_pos_raw(flow3r_bsp_captouch_petal_data_t *petal, bool get_rad,
+                  float *ret) {
+    for (uint8_t i = 0, index = petal->ring_index; i < CAPTOUCH_POS_RING_LEN;
+         i++) {
+        if (petal->ring[index].pressed) {
+            if (get_rad) {
+                ret[i] = petal->ring[index].rad / 16384.;
+            } else {
+                ret[i] = petal->ring[index].phi / 16384.;
+            }
+        } else {
+            ret[i] = NAN;
+        }
+        index = ring_decr(index, 1);
+    }
+}
+
+void flow3r_bsp_captouch_get_rad_raw(flow3r_bsp_captouch_petal_data_t *petal,
+                                     float *ret) {
+    _get_pos_raw(petal, true, ret);
+}
+
+void flow3r_bsp_captouch_get_phi_raw(flow3r_bsp_captouch_petal_data_t *petal,
+                                     float *ret) {
+    _get_pos_raw(petal, false, ret);
+}
