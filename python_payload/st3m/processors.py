@@ -68,7 +68,7 @@ class AudioProcessor(Processor):
             self._update_repeat()
 
 
-class ProcessorMidldeware(Responder):
+class ProcessorMidlddldldldldldldeware(Responder):
     """
     Combines system processors and runs them together with some kind of
     top-level foreground responder.
