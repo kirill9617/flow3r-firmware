@@ -261,7 +261,7 @@ class ViewManager(Responder):
                 if self._fully_drawn:
                     self._end_transition()
 
-        if self._input.buttons.os.middle.pressed:
+        if self._input.buttons.os.middle.released:
             if not self._history and self._debug:
                 utime.sleep(0.5)
                 machine.reset()
