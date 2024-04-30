@@ -10,10 +10,11 @@ from st3m import Responder, InputState, Reactor, settings
 from st3m.goose import Dict, Enum, List, ABCBase, abstractmethod, Optional
 from st3m.utils import tau
 from st3m.ui.view import ViewManager
-from st3m.input import power
+from st3m.input import power, InputController
 import st3m.power
 from ctx import Context
 import st3m.wifi
+from st3m.application import viewmanager_is_in_application
 
 import math
 import audio
@@ -28,14 +29,16 @@ class OverlayKind(Enum):
     # Naughty debug developers for naughty developers and debuggers.
     Debug = 1
     Touch = 2
-    Toast = 3
+    SystemMenu = 3
+    Volume = 4
 
 
 _all_kinds = [
     OverlayKind.Indicators,
     OverlayKind.Debug,
     OverlayKind.Touch,
-    OverlayKind.Toast,
+    OverlayKind.SystemMenu,
+    OverlayKind.Volume,
 ]
 
 
@@ -113,8 +116,10 @@ class Overlay(Responder):
 
 class Compositor(Responder):
     """
-    A Compositor blends together some ViewManager alongside with active
-    Overlays. Overlays can be enabled/disabled by kind.
+    The Compositor blends together the system ViewManager with active Overlays.
+    Most Overlays can be enabled/disabled by kind.
+
+    It also handles the os button (volume control, go back, system menu).
     """
 
     def __init__(self, main: ViewManager):
@@ -123,7 +128,7 @@ class Compositor(Responder):
         self.enabled: Dict[OverlayKind, bool] = {
             OverlayKind.Indicators: True,
             OverlayKind.Debug: True,
-            OverlayKind.Toast: True,
+            OverlayKind.Volume: True,
         }
         self._last_fps_string = ""
         self._clip_rect = Region()
@@ -133,10 +138,22 @@ class Compositor(Responder):
         self._last_enabled: List[Responder] = []
         self._redraw_pending = 0
 
+        self.input = InputController()
+        self.input.buttons.os.middle.repeat_enable(1000, 1000)
+
+        self._system_menu = OverlaySystemMenu(self.input, self)
+        self.add_overlay(self._system_menu)
+
+        self._volume = OverlayVolume(self.input)
+        self.add_overlay(self._volume)
+
     def _enabled_overlays(self) -> List[Responder]:
         res: List[Responder] = []
         for kind in _all_kinds:
-            if not self.enabled.get(kind, False):
+            if kind == OverlayKind.SystemMenu:
+                if not self._system_menu.active:
+                    continue
+            elif not self.enabled.get(kind, False):
                 continue
             if kind == OverlayKind.Indicators and not self.main.wants_icons():
                 continue
@@ -144,11 +161,49 @@ class Compositor(Responder):
                 res.append(overlay)
         return res
 
+    def go_home(self):
+        # should go all the way to the bottom of the stack
+        # but we don't trust the system not to inf loop so
+        # we're limiting depth to Big Number (100) for now
+        self.main.pop(depth=100)
+
+    def exit_app(self):
+        # we don't trust the system not to inf loop so
+        # we're limiting depth to Big Number (100) for now
+        for _ in range(100):
+            if not viewmanager_is_in_application(self.main):
+                return
+            self.main.exit_view()
+
+    def close_system_menu(self):
+        self.main._ignore_pressed()
+        self._system_menu.active = False
+
     def think(self, ins: InputState, delta_ms: int) -> None:
-        self.main.think(ins, delta_ms)
+        self.input.think(ins, delta_ms)
+        # tell the volume overlay whether to react to
+        # os_button input or not
+        self._volume.override_os_button_volume = (
+            self.main.override_os_button_volume and not self._system_menu.active
+        )
+
+        # tell the, uh, back-going-feature whether to react
+        # to os_button input or not
         if (
-            sys_display.get_mode() & sys_display.osd == 0
-            or settings.onoff_show_fps.value
+            self.input.buttons.os.middle.released
+            and not self._system_menu.active
+            and not self.main.override_os_button_back
+        ):
+            self.main.exit_view()
+
+        if self.input.buttons.os.middle.repeated:
+            self._system_menu.in_app = viewmanager_is_in_application(self.main)
+            self._system_menu.open()
+
+        if not self._system_menu.active:
+            self.main.think(ins, delta_ms)
+        if sys_display.get_mode() & sys_display.osd == 0 or (
+            settings.onoff_show_fps.value and not self._system_menu.active
         ):
             return
         self._enabled = self._enabled_overlays()
@@ -156,7 +211,8 @@ class Compositor(Responder):
             self._enabled[i].think(ins, delta_ms)
 
     def draw(self, ctx: Context) -> None:
-        self.main.draw(ctx)
+        if not self._system_menu.active:
+            self.main.draw(ctx)
         display_mode = sys_display.get_mode()
         redraw = False
         if self._redraw_pending:
@@ -167,7 +223,7 @@ class Compositor(Responder):
         self._display_mode = display_mode
         if (display_mode & sys_display.osd) == 0:
             return
-        if settings.onoff_show_fps.value:
+        if settings.onoff_show_fps.value and not self._system_menu.active:
             fps_string = "{0:.1f}".format(sys_display.fps())
             if redraw or fps_string != self._last_fps_string:
                 octx = sys_display.ctx(sys_display.osd)
@@ -316,6 +372,84 @@ class OverlayDebug(Overlay):
         return True
 
 
+class OverlaySystemMenu(Overlay):
+    kind = OverlayKind.SystemMenu
+
+    def __init__(self, inputcontroller, methodprovider) -> None:
+        self.input = inputcontroller
+        self.exit_app = methodprovider.exit_app
+        self.close_menu = methodprovider.close_system_menu
+        self.go_home = methodprovider.go_home
+        self._menu_pos = 0
+        self._os_menu_entries = [
+            "resume",
+            "go home",
+            #    "mixer",
+            #    "help",
+        ]
+        self._app_menu_entries = [
+            "resume",
+            "exit app",
+            #    "mixer",
+            #    "help",
+        ]
+        self.active = False
+
+    def open(self):
+        self._menu_pos = 0
+        self.latch = True
+        self.active = True
+        if self.in_app:
+            self.entries = self._app_menu_entries
+        else:
+            self.entries = self._os_menu_entries
+
+    def think(self, ins: InputState, delta_ms: int) -> None:
+        if self.input.buttons.os.middle.released:
+            if self.latch:
+                self.latch = False
+            else:
+                self.close_menu()
+        if self.input.buttons.app.middle.released:
+            if self._menu_pos == 0:
+                self.close_menu()
+            elif self._menu_pos == 1:
+                if self.in_app:
+                    self.exit_app()
+                else:
+                    self.go_home()
+                self.close_menu()
+        self._menu_pos += self.input.buttons.app.right.pressed
+        self._menu_pos -= self.input.buttons.app.left.pressed
+        self._menu_pos %= len(self.entries)
+
+    def draw(self, ctx: Context) -> None:
+        fg = (0x81 / 255, 0xCD / 255, 0xC6 / 255)
+        bg = (0, 0, 0)
+        ctx.rgb(*bg)
+        ctx.round_rectangle(-42, -47, 84, 94, 5).fill()
+        ctx.rgb(*fg)
+        ctx.round_rectangle(-42, -47, 84, 94, 5).stroke()
+        ctx.font_size = 18
+        ypos = -40
+        ctx.text_align = ctx.CENTER
+        for x, entry in enumerate(self.entries):
+            if self._menu_pos == x:
+                ctx.rgb(*fg)
+                ctx.round_rectangle(-35, ypos, 70, 20, 3).fill()
+                ctx.rgb(*bg)
+            else:
+                ctx.rgb(*fg)
+            ctx.move_to(0, ypos + 15)
+            ctx.text(entry)
+            ypos += 20
+
+    def needs_redraw(self, rect: Region) -> bool:
+        if self.active:
+            rect.add(-42, -42, 84, 84)
+        return self.active
+
+
 class OverlayCaptouch(Overlay):
     kind = OverlayKind.Touch
 
@@ -371,53 +505,53 @@ class OverlayVolume(Overlay):
     Icon depends on whether headphones are plugged in or not.
     """
 
-    kind = OverlayKind.Toast
+    kind = OverlayKind.Volume
 
-    def __init__(self) -> None:
+    def __init__(self, inputcontroller) -> None:
+        self.input = inputcontroller
         self._showing: Optional[int] = None
         self._volume = 0.0
         self._headphones = False
         self._muted = False
 
         self._started = False
-        self._prev_volume = self._volume
-        self._prev_headphones = self._headphones
-        self._prev_muted = self._muted
-
-    def changed(self) -> bool:
-        """
-        Returns true if there was a system volume change warranting re-drawing
-        the overlay.
-        """
-        if self._prev_volume != self._volume:
-            return True
-        if self._prev_headphones != self._headphones:
-            return True
-        if self._prev_muted != self._muted:
-            return True
-        return False
+        self.override_os_button_volume = False
 
     def think(self, ins: InputState, delta_ms: int) -> None:
-        self._volume = audio.get_volume_relative()
-        self._headphones = audio.headphones_are_connected()
-        self._muted = (self._volume == 0) or audio.get_mute()
-
-        if self._started:
-            if self.changed():
-                self._showing = 1000
-        else:
-            # Ignore first run cycle, to not show volume slider on startup.
+        # Ignore first run cycle, to not show volume slider on startup.
+        if not self._started:
             self._started = True
-
-        self._prev_volume = self._volume
-        self._prev_headphones = self._headphones
-        self._prev_muted = self._muted
-
-        if self._showing is None:
             return
-        self._showing -= delta_ms
-        if self._showing < 0:
-            self._showing = None
+        if self._showing is not None:
+            self._showing -= delta_ms
+            if self._showing < 0:
+                self._showing = None
+
+        if not self.override_os_button_volume:
+            prs = (
+                self.input.buttons.os.right.pressed - self.input.buttons.os.left.pressed
+            )
+            if prs:
+                audio.adjust_volume_dB(settings.num_volume_step_db.value * prs)
+                repeat = settings.num_volume_repeat_ms.value
+                repeat_wait = settings.num_volume_repeat_wait_ms.value
+                self._showing = max(1000, repeat_wait + 300)
+                if prs == 1:
+                    self.input.buttons.os.right.repeat_enable(repeat_wait, repeat)
+                elif prs == -1:
+                    self.input.buttons.os.left.repeat_enable(repeat_wait, repeat)
+            rpt = (
+                self.input.buttons.os.right.repeated
+                - self.input.buttons.os.left.repeated
+            )
+            if rpt:
+                audio.adjust_volume_dB(settings.num_volume_repeat_step_db.value * rpt)
+                self._showing = max(1000, settings.num_volume_repeat_ms.value + 300)
+
+        if self._showing is not None:
+            self._volume = audio.get_volume_relative()
+            self._headphones = audio.headphones_are_connected()
+            self._muted = (self._volume == 0) or audio.get_mute()
 
     def draw(self, ctx: Context) -> None:
         if self._showing is None:

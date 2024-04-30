@@ -8,7 +8,7 @@ from st3m.application import (
     ApplicationContext,
     setup_for_app,
 )
-from st3m import settings_menu as settings, logging, processors, wifi
+from st3m import settings_menu as settings, logging, wifi
 import st3m.wifi
 import st3m.utils
 
@@ -64,9 +64,6 @@ def _make_compositor(reactor: Reactor, vm: ViewManager) -> overlays.Compositor:
     """
     compositor = overlays.Compositor(vm)
 
-    volume = overlays.OverlayVolume()
-    compositor.add_overlay(volume)
-
     # Tie compositor's debug overlay to setting.
     def _onoff_debug_update() -> None:
         compositor.enabled[overlays.OverlayKind.Debug] = settings.onoff_debug.value
@@ -117,8 +114,7 @@ def run_view(v: View, debug_vm=True) -> None:
     sys_mode.mode_set(2)  # st3m_mode_kind_app
     vm.push(v)
     compositor = _make_compositor(reactor, vm)
-    top = processors.ProcessorMidldeware(compositor)
-    reactor.set_top(top)
+    reactor.set_top(compositor)
     reactor.run()
 
 

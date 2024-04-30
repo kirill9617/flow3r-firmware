@@ -504,3 +504,39 @@ def load_toml(toml_path):
             raise BundleMetadataCorrupt(str(e))
         except Exception as e:
             raise BundleMetadataCorrupt(str(e))
+
+
+def viewmanager_is_in_application(vm):
+    """
+    Temporary band-aid until the OS can provide this information properly.
+
+    Estimates whether the viewmanager is in an application right now.
+    Intended to be used with the viewmanager of the OS menu, otherwise
+    probably of limited usefulness and accuracy.
+
+    There's no perfect way to do this as of yet as applications
+    can go wild with the vm history. In the wild, false negatives
+    may occur, but false positives are unlikely unless somebody is
+    actively trying to mess with the OS.
+    """
+    stack = list(vm._history)
+    # the stack of views is technically vm._history.append(vm._incoming).
+    # however there is one execution order caveat:
+    #
+    # we're only using this rn to pop us one-by-one backwards
+    # thru the stack until we're outside of any application.
+    # the viewmanager doesn't process pop requests upon arrival,
+    # but waits until its next think:
+    #
+    # self._incoming will not be replaced before that, but its planned
+    # successor is stored in vm._pending, which is reset to None
+    # after it has been processed.
+    if vm._pending is None:
+        stack += [vm._incoming]
+    else:
+        stack += [vm._pending]
+
+    for view in stack:
+        if isinstance(view, Application):
+            return True
+    return False
