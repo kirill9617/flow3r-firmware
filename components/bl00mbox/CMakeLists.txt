@@ -7,6 +7,7 @@ idf_component_register(
         bl00mbox_user.c
         bl00mbox_plugin_registry.c
         bl00mbox_radspa_requirements.c
+        radspa/standard_plugin_lib/tuner.c
         radspa/standard_plugin_lib/osc.c
         radspa/standard_plugin_lib/osc_fm.c
         radspa/standard_plugin_lib/env_adsr.c

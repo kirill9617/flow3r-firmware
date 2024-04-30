@@ -669,3 +669,40 @@ class _Sequencer(_Plugin):
     def load_pattern(self, beat):
         num_tracks = min(len(beat["tracks"]), self.num_tracks)
         [self.load_track_pattern(beat["tracks"][i], i) for i in range(num_tracks)]
+
+
+@_plugin_set_subclass(1549)
+class _Tuner(_Plugin):
+    pass
+    # @property
+    # def wave(self):
+    #     return tuple([self.table_int8_array[i] for i in range(64)])
+
+    # def __repr__(self):
+        # ret = super().__repr__()
+        # # wave = self.wave
+        # ret += "\n  TUNER :\n"
+        # ret += "   " + "_" * 68 + "\n"
+        # ret += "  |" + " " * 68 + "|\n"
+        # symbols = "UW"
+        # symbol_counter = 0
+        # for i in range(15, -1, -1):
+        #     line = "  |  "
+        #     for j in range(64):
+        #         if j == 0:
+        #             upper = wave[63]
+        #         else:
+        #             upper = wave[j - 1]
+        #         upper = (upper + 128) >> 4
+        #         lower = (wave[j] + 128) >> 4
+        #         if lower > upper:
+        #             upper, lower = lower, upper
+        #         if (i >= lower) and (i <= upper):
+        #             line += symbols[symbol_counter]
+        #             symbol_counter = (symbol_counter + 1) % len(symbols)
+        #         else:
+        #             line += " "
+        #     line += "  |\n"
+        #     ret += line
+        # ret += "  |" + "_" * 68 + "|"
+        # return ret

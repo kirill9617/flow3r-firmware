@@ -1,5 +1,6 @@
 //SPDX-License-Identifier: CC0-1.0
 #include "bl00mbox_plugin_registry.h"
+#include <esp_log.h>
 
 bl00mbox_plugin_registry_t * bl00mbox_plugin_registry = NULL;
 uint16_t bl00mbox_plugin_registry_len = 0;
@@ -106,6 +107,7 @@ radspa_descriptor_t * bl00mbox_plugin_registry_get_id_from_index(uint32_t index)
 #include "range_shifter.h"
 #include "poly_squeeze.h"
 #include "bl00mbox_line_in.h"
+#include "tuner.h"
 
 void bl00mbox_plugin_registry_init(void){
     if(bl00mbox_plugin_registry_is_initialized) return;
@@ -130,4 +132,5 @@ void bl00mbox_plugin_registry_init(void){
 
     plugin_add(&osc_fm_desc);
     plugin_add(&lowpass_desc);   
+    plugin_add(&tuner_desc);   
 }

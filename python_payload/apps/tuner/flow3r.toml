@@ -1,0 +1,13 @@
+[app]
+name = "Tuner"
+category = "Media"
+
+[entry]
+class = "Tuner"
+
+[metadata]
+author = "rvbar_el3"
+license = "LGPL-3.0-only"
+url = ""
+description = ""
+version = 1
